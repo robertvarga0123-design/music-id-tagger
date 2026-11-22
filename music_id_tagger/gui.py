@@ -3,7 +3,7 @@ from __future__ import annotations
 import queue
 import threading
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, font as tkfont, messagebox, ttk
 
 from music_id_tagger.config import load_settings, save_settings
 from music_id_tagger.engine import Options, run
@@ -29,16 +29,23 @@ class App(tk.Tk):
         self.cancel = threading.Event()
         self.worker: threading.Thread | None = None
         self.paths: list[str] = []
+        self._fonts: list[tkfont.Font] = []
         self._build()
         self._load()
         self.after(120, self._drain)
         self.protocol("WM_DELETE_WINDOW", self._close)
 
+    def _face(self, size: int, bold: bool = False) -> tkfont.Font:
+        family = "Segoe UI" if self._windows() else "DejaVu Sans"
+        item = tkfont.Font(family=family, size=size, weight="bold" if bold else "normal")
+        self._fonts.append(item)
+        return item
+
     def _build(self) -> None:
-        self.option_add("*Font", "Segoe UI 10" if self._windows() else "DejaVu Sans 10")
+        self.option_add("*Font", str(self._face(10)))
         head = tk.Frame(self, bg=BG)
         head.pack(fill="x", padx=18, pady=(16, 8))
-        tk.Label(head, text="Music ID Tagger", bg=BG, fg=BRASS, font=("Segoe UI", 20, "bold")).pack(anchor="w")
+        tk.Label(head, text="Music ID Tagger", bg=BG, fg=BRASS, font=self._face(20, True)).pack(anchor="w")
         tk.Label(
             head,
             text="Hangminta a Shazammal, BPM, hangnem és DJ-stílus a Beatportról. Több mappa, egyszerre.",
@@ -57,7 +64,7 @@ class App(tk.Tk):
         right = tk.Frame(body, bg=PAPER, highlightbackground=LINE, highlightthickness=1)
         right.grid(row=0, column=1, sticky="nsew", padx=(8, 0), pady=8)
 
-        tk.Label(left, text="Mappák és fájlok", bg=PAPER, fg=INK, font=("Segoe UI", 12, "bold")).pack(
+        tk.Label(left, text="Mappák és fájlok", bg=PAPER, fg=INK, font=self._face(12, True)).pack(
             anchor="w", padx=12, pady=(12, 6)
         )
         self.listbox = tk.Listbox(
@@ -77,7 +84,7 @@ class App(tk.Tk):
         self._button(buttons, "Fájlok", self._add_files, BRASS).pack(side="left", padx=(0, 6))
         self._button(buttons, "Kijelölt törlése", self._remove, CLAY).pack(side="left")
 
-        tk.Label(right, text="Források", bg=PAPER, fg=INK, font=("Segoe UI", 12, "bold")).pack(
+        tk.Label(right, text="Források", bg=PAPER, fg=INK, font=self._face(12, True)).pack(
             anchor="w", padx=12, pady=(12, 6)
         )
         self.use_shazam = tk.BooleanVar(value=True)
