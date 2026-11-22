@@ -3,6 +3,7 @@ from __future__ import annotations
 import queue
 import threading
 import tkinter as tk
+import webbrowser
 from tkinter import filedialog, font as tkfont, messagebox, ttk
 
 from music_id_tagger.config import load_password, load_settings, save_settings
@@ -16,6 +17,17 @@ BRASS = "#e0a84a"
 CLAY = "#d4654a"
 ENTRY = "#26271f"
 LINE = "#3a3b32"
+WARN = "#f2c14e"
+LINK = "#9ec1ff"
+
+_STATE = {
+    "wait": "Várakozik",
+    "run": "Keres…",
+    "ok": "Kész",
+    "unsure": "! Bizonytalan",
+    "missed": "! Nincs találat",
+    "failed": "Hiba",
+}
 
 
 class App(tk.Tk):
@@ -29,6 +41,8 @@ class App(tk.Tk):
         self.cancel = threading.Event()
         self.worker: threading.Thread | None = None
         self.paths: list[str] = []
+        self.rows: dict[str, str] = {}
+        self.urls: dict[str, str] = {}
         self._fonts: list[tkfont.Font] = []
         self._build()
         self._load()
@@ -128,7 +142,7 @@ class App(tk.Tk):
         self.delay.pack(side="right")
 
         foot = tk.Frame(self, bg=BG)
-        foot.pack(fill="both", expand=False, padx=18, pady=(0, 14))
+        foot.pack(fill="both", expand=True, padx=18, pady=(0, 14))
         bar_row = tk.Frame(foot, bg=BG)
         bar_row.pack(fill="x")
         style = ttk.Style(self)
@@ -154,9 +168,56 @@ class App(tk.Tk):
         self.stop_btn.pack(side="left")
         self.stop_btn.configure(state="disabled")
 
+        style.configure(
+            "Tracks.Treeview",
+            background=ENTRY,
+            fieldbackground=ENTRY,
+            foreground=INK,
+            borderwidth=0,
+            rowheight=28,
+            font=str(self._face(10)),
+        )
+        style.configure(
+            "Tracks.Treeview.Heading",
+            background=PAPER,
+            foreground=MUTED,
+            relief="flat",
+            font=str(self._face(10, True)),
+        )
+        style.map("Tracks.Treeview", background=[("selected", "#3a3424")], foreground=[("selected", INK)])
+        list_wrap = tk.Frame(foot, bg=BG)
+        list_wrap.pack(fill="both", expand=True, pady=(0, 8))
+        self.tree = ttk.Treeview(
+            list_wrap,
+            columns=("file", "state", "found", "source"),
+            show="headings",
+            style="Tracks.Treeview",
+            height=8,
+        )
+        self.tree.heading("file", text="Fájl")
+        self.tree.heading("state", text="Állapot")
+        self.tree.heading("found", text="Találat")
+        self.tree.heading("source", text="Forrás")
+        self.tree.column("file", width=260, stretch=True)
+        self.tree.column("state", width=140, stretch=False, anchor="w")
+        self.tree.column("found", width=280, stretch=True)
+        self.tree.column("source", width=110, stretch=False, anchor="w")
+        self.tree.tag_configure("ok", foreground=INK)
+        self.tree.tag_configure("run", foreground=BRASS)
+        self.tree.tag_configure("wait", foreground=MUTED)
+        self.tree.tag_configure("unsure", foreground=WARN)
+        self.tree.tag_configure("missed", foreground=WARN)
+        self.tree.tag_configure("bad", foreground=CLAY)
+        self.tree.tag_configure("link", foreground=LINK)
+        scroll = ttk.Scrollbar(list_wrap, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=scroll.set)
+        self.tree.pack(side="left", fill="both", expand=True)
+        scroll.pack(side="right", fill="y")
+        self.tree.bind("<ButtonRelease-1>", self._open_source)
+
         self.log = tk.Text(
             foot,
-            height=12,
+            height=4,
             bg=ENTRY,
             fg=INK,
             insertbackground=INK,
@@ -337,6 +398,9 @@ class App(tk.Tk):
             delay=delay,
         )
         self.cancel = threading.Event()
+        self.rows.clear()
+        self.urls.clear()
+        self.tree.delete(*self.tree.get_children())
         self.start_btn.configure(state="disabled")
         self.stop_btn.configure(state="normal")
         self._write("info", "Indul.")
@@ -350,6 +414,7 @@ class App(tk.Tk):
             log=lambda level, text: self.queue.put(("log", level, text)),
             progress=lambda done, total: self.queue.put(("progress", done, total)),
             cancel=self.cancel,
+            track=lambda payload: self.queue.put(("track", payload)),
         )
         self.queue.put(("done", stats))
 
@@ -369,6 +434,8 @@ class App(tk.Tk):
                     self.progress["maximum"] = max(total, 1)
                     self.progress["value"] = done
                     self.progress_label.configure(text=f"{done} / {total}")
+                elif kind == "track":
+                    self._track_row(item[1])
                 elif kind == "done":
                     stats = item[1]
                     self.start_btn.configure(state="normal")
@@ -382,6 +449,36 @@ class App(tk.Tk):
         except queue.Empty:
             pass
         self.after(120, self._drain)
+
+    def _track_row(self, payload: dict) -> None:
+        key = str(payload.get("path") or payload.get("name") or "")
+        if not key:
+            return
+        state = str(payload.get("state") or "wait")
+        name = str(payload.get("name") or key)
+        detail = str(payload.get("detail") or "")
+        link = str(payload.get("label") or "")
+        url = str(payload.get("url") or "")
+        if not url.startswith("https://"):
+            url = ""
+            link = ""
+        tag = "unsure" if state in {"unsure", "missed"} else "bad" if state == "failed" else state if state in _STATE else "ok"
+        values = (name, _STATE.get(state, state), detail, link)
+        iid = self.rows.get(key)
+        if iid and self.tree.exists(iid):
+            self.tree.item(iid, values=values, tags=(tag,))
+        else:
+            iid = self.tree.insert("", "end", values=values, tags=(tag,))
+            self.rows[key] = iid
+        self.urls[iid] = url
+        self.tree.see(iid)
+
+    def _open_source(self, event) -> None:
+        iid = self.tree.identify_row(event.y)
+        column = self.tree.identify_column(event.x)
+        url = self.urls.get(iid, "")
+        if column == "#4" and url.startswith("https://"):
+            webbrowser.open(url)
 
     def _write(self, level: str, text: str) -> None:
         self.log.configure(state="normal")

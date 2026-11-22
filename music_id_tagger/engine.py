@@ -39,6 +39,9 @@ class FileResult:
     meta: dict = field(default_factory=dict)
     recognized: dict = field(default_factory=dict)
     log: list = field(default_factory=list)
+    unsure: bool = False
+    source_url: str = ""
+    source_label: str = ""
 
 
 @dataclass
@@ -99,6 +102,9 @@ def _push_file(
     meta: dict,
     recognized: dict,
     lines: list,
+    unsure: bool = False,
+    source_url: str = "",
+    source_label: str = "",
 ) -> None:
     stats.files.append(
         FileResult(
@@ -107,6 +113,9 @@ def _push_file(
             meta=_public_meta(meta),
             recognized=_public_meta(recognized),
             log=list(lines),
+            unsure=unsure,
+            source_url=source_url if source_url.startswith("https://") else "",
+            source_label=source_label if source_url.startswith("https://") else "",
         )
     )
 
@@ -194,12 +203,56 @@ def _line(meta: dict) -> str:
     return " | ".join(bits)
 
 
+def _file_key(path: Path) -> str:
+    try:
+        return str(path.resolve())
+    except OSError:
+        return str(path)
+
+
+def _emit(track, key: str, name: str, state: str, detail: str, url: str, label: str) -> None:
+    if track is None:
+        return
+    safe_url = url if isinstance(url, str) and url.startswith("https://") else ""
+    track(
+        {
+            "path": key,
+            "name": name,
+            "state": state,
+            "detail": detail,
+            "url": safe_url,
+            "label": label if safe_url else "",
+        }
+    )
+
+
+def _remember_hit(found: dict, hit: dict) -> None:
+    url = clean(hit.get("source_url"))
+    if url.startswith("https://"):
+        found["source_url"] = url
+    if hit.get("match_score") not in (None, ""):
+        found["match_score"] = hit["match_score"]
+
+
+def _source_label(url: str) -> str:
+    if "beatport.com" in url:
+        return "Beatport"
+    if "spotify.com" in url:
+        return "Spotify"
+    if "shazam.com" in url:
+        return "Shazam"
+    if "musicbrainz.org" in url:
+        return "MusicBrainz"
+    return "Forrás" if url else ""
+
+
 def run(
     paths: list[str],
     options: Options,
     log: LogFn,
     progress: ProgressFn,
     cancel,
+    track: Callable[[dict], None] | None = None,
 ) -> Stats:
     from music_id_tagger.rekordbox import audio_from_xml, collect_xml, path_key, update_library
 
@@ -217,6 +270,8 @@ def run(
         "info",
         f"{len(files)} fájl. {'Próba mód, semmi nem íródik.' if options.dry_run else 'A tagek beíródnak a fájlokba.'}",
     )
+    for path in files:
+        _emit(track, _file_key(path), path.name, "wait", "", "", "")
 
     beatport = None
     if options.use_beatport and options.beatport_user and options.beatport_password:
@@ -249,7 +304,7 @@ def run(
         log("muted", "Spotify be van kapcsolva, de nincs Client ID vagy Client Secret.")
 
     try:
-        asyncio.run(_process(files, options, beatport, spotify, log, progress, cancel, stats))
+        asyncio.run(_process(files, options, beatport, spotify, log, progress, cancel, stats, track))
     except Exception as exc:
         stats.failed += 1
         log("err", f"A feldolgozás megszakadt: {exc}")
@@ -278,7 +333,7 @@ def run(
     return stats
 
 
-async def _process(files, options: Options, beatport, spotify, log: LogFn, progress: ProgressFn, cancel, stats: Stats) -> None:
+async def _process(files, options: Options, beatport, spotify, log: LogFn, progress: ProgressFn, cancel, stats: Stats, track) -> None:
     shazam = None
     context = None
     if options.use_shazam:
@@ -296,8 +351,9 @@ async def _process(files, options: Options, beatport, spotify, log: LogFn, progr
             if cancel.is_set():
                 break
             progress(index - 1, stats.total)
+            _emit(track, _file_key(path), path.name, "run", "", "", "")
             try:
-                await _one(path, options, beatport, spotify, shazam, log, stats)
+                await _one(path, options, beatport, spotify, shazam, log, stats, track)
             except Exception as exc:
                 stats.failed += 1
                 message = f"Hiba: {path.name} — {exc}"
@@ -310,7 +366,9 @@ async def _process(files, options: Options, beatport, spotify, log: LogFn, progr
                         {},
                         {},
                         [{"level": "err", "message": message}],
+                        unsure=True,
                     )
+                    _emit(track, _file_key(path), path.name, "failed", "Hiba", "", "")
             progress(index, stats.total)
             if index < len(files) and not cancel.is_set():
                 await _sleep(max(0.0, options.delay), cancel)
@@ -319,7 +377,7 @@ async def _process(files, options: Options, beatport, spotify, log: LogFn, progr
             await context.__aexit__(None, None, None)
 
 
-async def _one(path: Path, options: Options, beatport, spotify, shazam, log: LogFn, stats: Stats) -> None:
+async def _one(path: Path, options: Options, beatport, spotify, shazam, log: LogFn, stats: Stats, track) -> None:
     lines: list[dict[str, str]] = []
 
     def flog(level: str, message: str) -> None:
@@ -369,6 +427,7 @@ async def _one(path: Path, options: Options, beatport, spotify, shazam, log: Log
                 found["artist"] = hit.get("artist")
             previous = found.get("source")
             found["source"] = "spotify" if not previous else f"{previous}+spotify"
+            _remember_hit(found, hit)
             flog("ok", f"Spotify: {clean(hit.get('artist'))} - {clean(hit.get('title'))} | {hit.get('isrc') or 'nincs ISRC'}")
 
     if beatport is not None and query_artist and query_title:
@@ -399,6 +458,7 @@ async def _one(path: Path, options: Options, beatport, spotify, shazam, log: Log
                 found["artist"] = hit.get("artist")
             previous = found.get("source")
             found["source"] = "beatport" if not previous else f"{previous}+beatport"
+            _remember_hit(found, hit)
             flog(
                 "ok",
                 f"Beatport: {hit.get('bpm') or '–'} BPM, {hit.get('key') or '–'}, {hit.get('genre') or '–'}",
@@ -416,20 +476,29 @@ async def _one(path: Path, options: Options, beatport, spotify, shazam, log: Log
             flog("err", f"AcoustID hiba ({path.name}): {exc}")
 
     useful = any(found.get(key) for key in ("title", "artist", "genre", "bpm", "key", "beatport_id"))
+    from music_id_tagger.match import is_uncertain
+
+    url = clean(found.get("source_url"))
+    label = _source_label(url)
     if not useful:
         stats.missed += 1
         flog("muted", f"Nincs találat: {path.name}")
-        _push_file(stats, path.name, "missed", existing, found, lines)
+        _push_file(stats, path.name, "missed", existing, found, lines, unsure=True, source_url=url, source_label=label)
+        _emit(track, _file_key(path), path.name, "missed", "Nincs találat", url, label)
         return
 
     final = apply_meta(existing, found, keep_identity=options.keep_identity)
+    unsure = is_uncertain(found, guessed)
+    if unsure:
+        flog("muted", f"Bizonytalan találat, nézd meg a forrást: {path.name}")
     prefix = "PRÓBA" if options.dry_run else "ÍRVA"
     try:
         await asyncio.to_thread(write_tags, path, final, options.dry_run, options.embed_cover)
     except Exception as exc:
         stats.failed += 1
         flog("err", f"Tag írás hiba ({path.name}): {exc}")
-        _push_file(stats, path.name, "failed", final, found, lines)
+        _push_file(stats, path.name, "failed", final, found, lines, unsure=True, source_url=url, source_label=label)
+        _emit(track, _file_key(path), path.name, "failed", "Hiba", url, label)
         return
     stats.ok += 1
     flog("ok", f"{prefix}: {path.name} → {_line(final)}")
@@ -439,7 +508,9 @@ async def _one(path: Path, options: Options, beatport, spotify, shazam, log: Log
         stats.by_path[path_key(path)] = final
     except OSError:
         pass
-    _push_file(stats, path.name, "ok", final, found, lines)
+    state = "unsure" if unsure else "ok"
+    _push_file(stats, path.name, "ok", final, found, lines, unsure=unsure, source_url=url, source_label=label)
+    _emit(track, _file_key(path), path.name, state, _line(final), url, label)
 
 
 async def _sleep(seconds: float, cancel) -> None:
