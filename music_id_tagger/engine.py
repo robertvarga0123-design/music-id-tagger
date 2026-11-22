@@ -49,6 +49,7 @@ class Stats:
     failed: int = 0
     cancelled: bool = False
     files: list[FileResult] = field(default_factory=list)
+    by_path: dict = field(default_factory=dict)
 
 
 _PUBLIC_META_KEYS = (
@@ -142,6 +143,22 @@ def collect_files(paths: list[str]) -> list[Path]:
     return found
 
 
+def _merge_files(primary: list[Path], extra: list[Path]) -> list[Path]:
+    found: list[Path] = []
+    seen: set[str] = set()
+    for path in [*primary, *extra]:
+        try:
+            key = os.path.normcase(str(path.resolve()))
+        except OSError:
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        found.append(path)
+    found.sort(key=lambda item: str(item).lower())
+    return found
+
+
 def _blank(value) -> bool:
     return not clean(value)
 
@@ -184,11 +201,16 @@ def run(
     progress: ProgressFn,
     cancel,
 ) -> Stats:
+    from music_id_tagger.rekordbox import audio_from_xml, collect_xml, path_key, update_library
+
     stats = Stats()
-    files = collect_files(paths)
+    xmls = collect_xml(paths)
+    files = _merge_files(collect_files(paths), audio_from_xml(xmls))
     stats.total = len(files)
+    if xmls:
+        log("info", f"Rekordbox XML: {len(xmls)} lista.")
     if not files:
-        log("err", "Nincs audio fájl a megadott helyeken.")
+        log("err", "Nincs audio fájl a megadott helyeken." if not xmls else "A Rekordbox listában egy hangfájl sem található a gépen.")
         progress(0, 0)
         return stats
     log(
@@ -234,6 +256,20 @@ def run(
     if cancel.is_set():
         stats.cancelled = True
         log("muted", "Megállítva.")
+    else:
+        for xml in xmls:
+            try:
+                changed, missing, notes = update_library(xml, stats.by_path, options.keep_identity, options.dry_run)
+            except Exception as exc:
+                stats.failed += 1
+                log("err", f"Rekordbox XML hiba ({xml.name}): {exc}")
+                continue
+            prefix = "PRÓBA XML" if options.dry_run else "XML ÍRVA"
+            log("info", f"{prefix}: {xml.name} — {changed} szám javítva, {missing} fájl hiányzik.")
+            for note in notes:
+                log("ok", note)
+            if changed and not options.dry_run:
+                log("ok", f"Biztonsági másolat: {xml.name}.bak")
     mode = "A fájlok nem változtak." if options.dry_run else "A találatok be lettek írva."
     log(
         "info",
@@ -397,6 +433,12 @@ async def _one(path: Path, options: Options, beatport, spotify, shazam, log: Log
         return
     stats.ok += 1
     flog("ok", f"{prefix}: {path.name} → {_line(final)}")
+    try:
+        from music_id_tagger.rekordbox import path_key
+
+        stats.by_path[path_key(path)] = final
+    except OSError:
+        pass
     _push_file(stats, path.name, "ok", final, found, lines)
 
 

@@ -5,7 +5,7 @@ import threading
 import tkinter as tk
 from tkinter import filedialog, font as tkfont, messagebox, ttk
 
-from music_id_tagger.config import load_settings, save_settings
+from music_id_tagger.config import load_password, load_settings, save_settings
 from music_id_tagger.engine import Options, run
 
 BG = "#10110f"
@@ -48,7 +48,7 @@ class App(tk.Tk):
         tk.Label(head, text="Music ID Tagger", bg=BG, fg=BRASS, font=self._face(20, True)).pack(anchor="w")
         tk.Label(
             head,
-            text="Hangminta a Shazammal, BPM, hangnem és DJ-stílus a Beatportról. Több mappa, egyszerre.",
+            text="Hangminta a Shazammal, BPM és stílus a Beatportról. Húzd ide a mappát, a zenét vagy a Rekordbox XML-t.",
             bg=BG,
             fg=MUTED,
         ).pack(anchor="w", pady=(2, 0))
@@ -67,6 +67,12 @@ class App(tk.Tk):
         tk.Label(left, text="Mappák és fájlok", bg=PAPER, fg=INK, font=self._face(12, True)).pack(
             anchor="w", padx=12, pady=(12, 6)
         )
+        tk.Label(
+            left,
+            text="Húzd ide a mappát, a zenét vagy a Rekordbox XML-t.",
+            bg=PAPER,
+            fg=MUTED,
+        ).pack(anchor="w", padx=12, pady=(0, 6))
         self.listbox = tk.Listbox(
             left,
             bg=ENTRY,
@@ -97,7 +103,7 @@ class App(tk.Tk):
         self._check(right, "Beatport (BPM, hangnem, stílus)", self.use_beatport)
         tk.Label(right, text="Beatport felhasználó", bg=PAPER, fg=MUTED).pack(anchor="w", padx=12, pady=(8, 0))
         self.user = self._entry(right)
-        tk.Label(right, text="Jelszó  ·  nem mentjük el", bg=PAPER, fg=MUTED).pack(anchor="w", padx=12, pady=(8, 0))
+        tk.Label(right, text="Jelszó  ·  erre a gépre emlékezik", bg=PAPER, fg=MUTED).pack(anchor="w", padx=12, pady=(8, 0))
         self.password = self._entry(right, secret=True)
         self._check(right, "Spotify (album, év, ISRC)", self.use_spotify)
         tk.Label(right, text="Spotify Client ID", bg=PAPER, fg=MUTED).pack(anchor="w", padx=12, pady=(8, 0))
@@ -164,6 +170,8 @@ class App(tk.Tk):
         self.log.tag_configure("info", foreground=BRASS)
         self.log.tag_configure("muted", foreground=MUTED)
         self.log.configure(state="disabled")
+        self.update_idletasks()
+        self._enable_drop()
 
     def _windows(self) -> bool:
         import sys
@@ -218,11 +226,31 @@ class App(tk.Tk):
 
     def _add_files(self) -> None:
         files = filedialog.askopenfilenames(
-            title="Zene fájlok",
-            filetypes=[("Hang", "*.mp3 *.flac *.m4a *.wav *.aiff *.aif *.ogg *.opus"), ("Minden", "*.*")],
+            title="Zene vagy Rekordbox XML",
+            filetypes=[
+                ("Hang és Rekordbox", "*.mp3 *.flac *.m4a *.wav *.aiff *.aif *.ogg *.opus *.xml"),
+                ("Rekordbox XML", "*.xml"),
+                ("Minden", "*.*"),
+            ],
         )
         for file in files:
             self._add_path(file)
+
+    def _enable_drop(self) -> None:
+        try:
+            from music_id_tagger.dropfiles import hook_dropfiles
+
+            hook_dropfiles(self, self._on_drop)
+            hook_dropfiles(self.listbox, self._on_drop)
+        except Exception:
+            return
+
+    def _on_drop(self, paths: list[str]) -> None:
+        for raw in paths:
+            text = raw.decode("utf-8", "replace") if isinstance(raw, bytes) else str(raw)
+            text = text.strip().strip('"')
+            if text:
+                self._add_path(text)
 
     def _add_path(self, path: str) -> None:
         if path not in self.paths:
@@ -241,6 +269,9 @@ class App(tk.Tk):
             self._add_path(str(path))
         if data.get("beatport_user"):
             self.user.insert(0, str(data["beatport_user"]))
+        remembered = load_password(data)
+        if remembered:
+            self.password.insert(0, remembered)
         if data.get("acoustid_key"):
             self.acoustid.insert(0, str(data["acoustid_key"]))
         if data.get("spotify_client_id"):
@@ -264,6 +295,7 @@ class App(tk.Tk):
             {
                 "folders": self.paths,
                 "beatport_user": self.user.get().strip(),
+                "beatport_password": self.password.get(),
                 "spotify_client_id": self.spotify_id.get().strip(),
                 "acoustid_key": self.acoustid.get().strip(),
                 "use_shazam": self.use_shazam.get(),
@@ -341,7 +373,6 @@ class App(tk.Tk):
                     stats = item[1]
                     self.start_btn.configure(state="normal")
                     self.stop_btn.configure(state="disabled")
-                    self.password.delete(0, "end")
                     self.spotify_secret.delete(0, "end")
                     if not stats.cancelled:
                         messagebox.showinfo(

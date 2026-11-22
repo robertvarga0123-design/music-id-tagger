@@ -37,6 +37,8 @@ hidden = [
     "music_id_tagger.match",
     "music_id_tagger.config",
     "music_id_tagger.cli",
+    "music_id_tagger.rekordbox",
+    "music_id_tagger.dropfiles",
     "acoustid",
     "musicbrainzngs",
 ]
