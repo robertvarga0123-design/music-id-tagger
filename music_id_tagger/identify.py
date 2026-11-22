@@ -36,6 +36,14 @@ def _section_fields(track: dict) -> dict[str, str]:
     return found
 
 
+def _shazam_url(track: dict) -> str | None:
+    share = track.get("share") if isinstance(track.get("share"), dict) else {}
+    direct = clean(track.get("url") or share.get("href") or share.get("html"))
+    if direct.startswith("https://www.shazam.com/") or direct.startswith("https://shazam.com/"):
+        return direct
+    return None
+
+
 def shazam_to_meta(payload: Any) -> dict[str, Any] | None:
     data = _dump(payload)
     if not isinstance(data, dict):
@@ -61,6 +69,7 @@ def shazam_to_meta(payload: Any) -> dict[str, Any] | None:
         "genre": genre,
         "cover_url": cover or None,
         "shazam_id": track.get("key"),
+        "source_url": _shazam_url(track),
         "source": "shazam",
     }
 
@@ -91,6 +100,7 @@ def identify_acoustid(path: Path, api_key: str) -> dict[str, Any] | None:
         "artist": artist,
         "mbid": recording_id,
         "score": score,
+        "source_url": f"https://musicbrainz.org/recording/{recording_id}" if recording_id else None,
         "source": "acoustid",
     }
     try:

@@ -34,6 +34,17 @@ def spotify_key(pitch: Any, mode: Any) -> tuple[str | None, str | None]:
     return None, None
 
 
+def _spotify_url(track: dict) -> str | None:
+    external = track.get("external_urls") if isinstance(track.get("external_urls"), dict) else {}
+    direct = clean(external.get("spotify"))
+    if direct.startswith("https://open.spotify.com/"):
+        return direct
+    ident = clean(track.get("id"))
+    if ident:
+        return f"https://open.spotify.com/track/{ident}"
+    return None
+
+
 def normalize_track(track: dict, features: dict | None = None) -> dict[str, Any]:
     artists = ", ".join(
         clean(item.get("name"))
@@ -52,6 +63,7 @@ def normalize_track(track: dict, features: dict | None = None) -> dict[str, Any]
         "isrc": clean(external.get("isrc")) or None,
         "cover_url": images[0]["url"] if images else None,
         "spotify_id": clean(track.get("id")) or None,
+        "source_url": _spotify_url(track),
         "source": "spotify",
     }
     if features:

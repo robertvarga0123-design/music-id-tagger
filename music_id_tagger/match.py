@@ -151,6 +151,30 @@ def best_track(tracks: list, artist: str, title: str, minimum: int = 5) -> tuple
     return best, best_score
 
 
+def is_uncertain(meta: dict | None, guessed: bool = False) -> bool:
+    """True when the hit should be checked by hand.
+
+    A Shazam or AcoustID audio match plus a strong catalog score is sure.
+    A filename guess, a weak score, or no source at all is not.
+    """
+    data = meta or {}
+    source = clean(data.get("source")).lower()
+    audio = "shazam" in source or "acoustid" in source
+    catalog = "beatport" in source or "spotify" in source
+    if not audio and not catalog:
+        return True
+    if guessed and not audio:
+        return True
+    raw = data.get("match_score")
+    if raw in (None, ""):
+        return False
+    try:
+        score = float(raw)
+    except (TypeError, ValueError):
+        return True
+    return score < 12
+
+
 def parse_filename(filename: str) -> tuple[str, str] | None:
     stem = filename
     for ext in (

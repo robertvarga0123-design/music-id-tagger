@@ -35,6 +35,17 @@ def _name(value: Any) -> str | None:
     return text or None
 
 
+def beatport_track_url(track: dict) -> str | None:
+    slug = clean(track.get("slug"))
+    ident = track.get("id")
+    if slug and ident not in (None, ""):
+        return f"https://www.beatport.com/track/{slug}/{ident}"
+    direct = clean(track.get("url"))
+    if direct.startswith("https://www.beatport.com/track/"):
+        return direct
+    return None
+
+
 def _cover_url(track: dict) -> str | None:
     for source in (track.get("image"), (track.get("release") or {}).get("image") if isinstance(track.get("release"), dict) else None):
         if isinstance(source, str) and source.startswith("http"):
@@ -92,6 +103,7 @@ def normalize_track(track: dict) -> dict[str, Any]:
         "isrc": clean(track.get("isrc")) or None,
         "catalog": catalog,
         "cover_url": _cover_url(track),
+        "source_url": beatport_track_url(track),
         "source": "beatport",
     }
 
