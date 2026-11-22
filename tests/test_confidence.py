@@ -20,7 +20,13 @@ def test_miss_without_source_is_uncertain():
     assert is_uncertain({}, guessed=False) is True
 
 
-def test_source_pages():
+def test_parse_beatport_id_from_track_link():
+    from music_id_tagger.beatport import parse_beatport_id
+
+    assert parse_beatport_id("https://www.beatport.com/track/its-the-e/12345678") == "12345678"
+    assert parse_beatport_id("https://www.beatport.com/hu/track/its-the-e/99?s=1") == "99"
+    assert parse_beatport_id("12345678") == "12345678"
+    assert parse_beatport_id("nem link") is None
     assert beatport_track_url({"slug": "its-the-e", "id": 123}) == "https://www.beatport.com/track/its-the-e/123"
     assert _spotify_url({"id": "abc"}) == "https://open.spotify.com/track/abc"
     assert _shazam_url({"url": "https://www.shazam.com/track/1/its-the-e"}) == "https://www.shazam.com/track/1/its-the-e"

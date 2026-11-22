@@ -4,6 +4,7 @@ import queue
 import threading
 import tkinter as tk
 import webbrowser
+from pathlib import Path
 from tkinter import filedialog, font as tkfont, messagebox, ttk
 
 from music_id_tagger.config import load_password, load_settings, save_settings
@@ -41,6 +42,7 @@ class App(tk.Tk):
         self.cancel = threading.Event()
         self.worker: threading.Thread | None = None
         self.paths: list[str] = []
+        self.beatport_links: dict[str, str] = {}
         self.rows: dict[str, str] = {}
         self.urls: dict[str, str] = {}
         self._fonts: list[tkfont.Font] = []
@@ -103,6 +105,14 @@ class App(tk.Tk):
         self._button(buttons, "Mappa", self._add_folder, BRASS).pack(side="left", padx=(0, 6))
         self._button(buttons, "Fájlok", self._add_files, BRASS).pack(side="left", padx=(0, 6))
         self._button(buttons, "Kijelölt törlése", self._remove, CLAY).pack(side="left")
+        tk.Label(left, text="Beatport link vagy ID a kijelölt fájlhoz", bg=PAPER, fg=MUTED).pack(
+            anchor="w", padx=12, pady=(0, 0)
+        )
+        link_row = tk.Frame(left, bg=PAPER)
+        link_row.pack(fill="x", padx=12, pady=(2, 12))
+        self.bp_link = tk.Entry(link_row, bg=ENTRY, fg=INK, insertbackground=INK, relief="flat")
+        self.bp_link.pack(side="left", fill="x", expand=True, ipady=4)
+        self._button(link_row, "ID mentése", self._assign_beatport, BRASS).pack(side="left", padx=(6, 0))
 
         tk.Label(right, text="Források", bg=PAPER, fg=INK, font=self._face(12, True)).pack(
             anchor="w", padx=12, pady=(12, 6)
@@ -307,20 +317,56 @@ class App(tk.Tk):
             return
 
     def _on_drop(self, paths: list[str]) -> None:
+        from music_id_tagger.beatport import parse_beatport_id
+
         for raw in paths:
             text = raw.decode("utf-8", "replace") if isinstance(raw, bytes) else str(raw)
             text = text.strip().strip('"')
-            if text:
-                self._add_path(text)
+            if not text:
+                continue
+            ident = parse_beatport_id(text)
+            if ident and not Path(text).exists():
+                self._store_beatport(ident)
+                continue
+            self._add_path(text)
+
+    def _assign_beatport(self) -> None:
+        from music_id_tagger.beatport import parse_beatport_id
+
+        ident = parse_beatport_id(self.bp_link.get())
+        if not ident:
+            messagebox.showinfo("Music ID Tagger", "Ez nem Beatport szám-link és nem ID.\nPélda: beatport.com/track/cim/12345678")
+            return
+        self._store_beatport(ident)
+        self.bp_link.delete(0, "end")
+
+    def _store_beatport(self, ident: str) -> None:
+        selected = self.listbox.curselection()
+        if not selected:
+            messagebox.showinfo("Music ID Tagger", "Előbb jelöld ki a fájlt, amihez ez a Beatport ID tartozik.")
+            return
+        index = selected[0]
+        path = self.paths[index]
+        self.beatport_links[path] = ident
+        self._show_path(index)
 
     def _add_path(self, path: str) -> None:
         if path not in self.paths:
             self.paths.append(path)
             self.listbox.insert("end", path)
 
+    def _show_path(self, index: int) -> None:
+        path = self.paths[index]
+        ident = self.beatport_links.get(path, "")
+        label = f"{path}    BP {ident}" if ident else path
+        self.listbox.delete(index)
+        self.listbox.insert(index, label)
+        self.listbox.selection_set(index)
+
     def _remove(self) -> None:
         selected = list(self.listbox.curselection())
         for index in reversed(selected):
+            self.beatport_links.pop(self.paths[index], None)
             self.listbox.delete(index)
             del self.paths[index]
 
@@ -396,6 +442,7 @@ class App(tk.Tk):
             keep_identity=self.keep_identity.get(),
             embed_cover=self.embed_cover.get(),
             delay=delay,
+            beatport_by_file=dict(self.beatport_links),
         )
         self.cancel = threading.Event()
         self.rows.clear()

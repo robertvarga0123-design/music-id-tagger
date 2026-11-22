@@ -154,6 +154,13 @@ def apply_track(track: ET.Element, meta: dict, keep_identity: bool) -> list[str]
             changes.append(f"AverageBpm: {previous or '–'} → {bpm}")
             for tempo in track.findall("TEMPO"):
                 tempo.set("Bpm", bpm)
+    ident = clean(meta.get("beatport_id"))
+    if ident:
+        stamp = f"Beatport ID: {ident}"
+        current = clean(track.get("Comments"))
+        if stamp not in current:
+            track.set("Comments", f"{current} | {stamp}".strip(" |") if current else stamp)
+            changes.append(f"Comments: {stamp}")
     return changes
 
 

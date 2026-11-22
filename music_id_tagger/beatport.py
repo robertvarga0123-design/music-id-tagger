@@ -35,6 +35,23 @@ def _name(value: Any) -> str | None:
     return text or None
 
 
+_TRACK_ID = re.compile(r"beatport\.com/(?:[a-z]{2}/)?track/(?:[^/?#]+/)?(\d+)", re.I)
+_BARE_ID = re.compile(r"^\d{4,12}$")
+
+
+def parse_beatport_id(value) -> str | None:
+    """The number at the end of a Beatport track link, or a bare catalog id."""
+    text = clean(value)
+    if not text:
+        return None
+    match = _TRACK_ID.search(text.replace("\\", "/"))
+    if match:
+        return match.group(1)
+    if _BARE_ID.match(text):
+        return text
+    return None
+
+
 def beatport_track_url(track: dict) -> str | None:
     slug = clean(track.get("slug"))
     ident = track.get("id")
@@ -234,7 +251,50 @@ class BeatportClient:
             return None
         meta = normalize_track(winner)
         meta["match_score"] = score
+        ident = parse_beatport_id(meta.get("source_url")) or parse_beatport_id(meta.get("beatport_id"))
+        if ident:
+            meta["beatport_id"] = ident
         return meta
+
+    def by_id(self, track_id, log: Callable[[str, str], None] | None = None) -> dict[str, Any] | None:
+        ident = parse_beatport_id(track_id)
+        if not self.access_token or not ident:
+            return None
+        response = self._get_track(ident)
+        if response is not None and response.status_code == 401 and self._refresh():
+            response = self._get_track(ident)
+        if response is None or response.status_code != 200:
+            code = response.status_code if response is not None else 0
+            if log:
+                log("err", f"Beatport ID {ident} nem tölthető ({code}).")
+            return None
+        body = response.json()
+        track = body if isinstance(body, dict) and (body.get("id") or body.get("name")) else None
+        if track is None and isinstance(body, dict):
+            nested = body.get("track") or body.get("data") or body.get("results")
+            if isinstance(nested, list):
+                nested = nested[0] if nested else None
+            if isinstance(nested, dict):
+                track = nested
+        if not isinstance(track, dict):
+            if log:
+                log("err", f"Beatport ID {ident}: üres válasz.")
+            return None
+        meta = normalize_track(track)
+        meta["beatport_id"] = ident
+        meta["match_score"] = 100
+        meta["source_url"] = meta.get("source_url") or f"https://www.beatport.com/track/{ident}"
+        return meta
+
+    def _get_track(self, track_id: str):
+        try:
+            return self.session.get(
+                f"{API}/v4/catalog/tracks/{track_id}/",
+                headers={"Authorization": f"Bearer {self.access_token}"},
+                timeout=20,
+            )
+        except Exception:
+            return None
 
     def _get_search(self, query: str):
         try:

@@ -28,6 +28,7 @@ class Options:
     keep_identity: bool = True
     embed_cover: bool = True
     delay: float = 1.0
+    beatport_by_file: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -234,9 +235,10 @@ def _remember_hit(found: dict, hit: dict) -> None:
         found["match_score"] = hit["match_score"]
 
 
-def _source_label(url: str) -> str:
-    if "beatport.com" in url:
-        return "Beatport"
+def _source_label(url: str, beatport_id: str = "") -> str:
+    ident = clean(beatport_id)
+    if "beatport.com" in url or ident:
+        return f"Beatport {ident}".strip() if "beatport.com" in url or ident else "Beatport"
     if "spotify.com" in url:
         return "Spotify"
     if "shazam.com" in url:
@@ -244,6 +246,25 @@ def _source_label(url: str) -> str:
     if "musicbrainz.org" in url:
         return "MusicBrainz"
     return "Forrás" if url else ""
+
+
+def _forced_beatport_id(path: Path, options: Options) -> str:
+    table = options.beatport_by_file or {}
+    keys = [str(path), path.name]
+    try:
+        keys.insert(0, str(path.resolve()))
+    except OSError:
+        pass
+    for key in keys:
+        ident = ""
+        raw = table.get(key)
+        if raw:
+            from music_id_tagger.beatport import parse_beatport_id
+
+            ident = parse_beatport_id(raw) or ""
+        if ident:
+            return ident
+    return ""
 
 
 def run(
@@ -412,6 +433,36 @@ async def _one(path: Path, options: Options, beatport, spotify, shazam, log: Log
             query_title = query_title or parsed[1]
             guessed = True
 
+    forced = _forced_beatport_id(path, options)
+    if beatport is not None and forced:
+        hit = await asyncio.to_thread(beatport.by_id, forced, flog)
+        if hit:
+            for key in (
+                "title",
+                "artist",
+                "genre",
+                "bpm",
+                "key",
+                "key_name",
+                "label",
+                "beatport_id",
+                "isrc",
+                "mix",
+                "catalog",
+                "cover_url",
+                "album",
+                "year",
+                "source_url",
+            ):
+                if hit.get(key):
+                    found[key] = hit[key]
+            found["beatport_id"] = forced
+            found["match_score"] = 100
+            previous = found.get("source")
+            found["source"] = "beatport" if not previous else f"{previous}+beatport"
+            guessed = False
+            flog("ok", f"Beatport ID {forced}: {clean(hit.get('artist'))} - {clean(hit.get('title'))}")
+
     if spotify is not None and query_artist and query_title:
         hit = await asyncio.to_thread(spotify.search, query_artist, query_title, flog)
         if hit:
@@ -430,7 +481,7 @@ async def _one(path: Path, options: Options, beatport, spotify, shazam, log: Log
             _remember_hit(found, hit)
             flog("ok", f"Spotify: {clean(hit.get('artist'))} - {clean(hit.get('title'))} | {hit.get('isrc') or 'nincs ISRC'}")
 
-    if beatport is not None and query_artist and query_title:
+    if beatport is not None and query_artist and query_title and not found.get("beatport_id"):
         hit = await asyncio.to_thread(beatport.search, query_artist, query_title, flog)
         if hit:
             if guessed and not found.get("title"):
@@ -476,10 +527,16 @@ async def _one(path: Path, options: Options, beatport, spotify, shazam, log: Log
             flog("err", f"AcoustID hiba ({path.name}): {exc}")
 
     useful = any(found.get(key) for key in ("title", "artist", "genre", "bpm", "key", "beatport_id"))
+    from music_id_tagger.beatport import parse_beatport_id
     from music_id_tagger.match import is_uncertain
 
+    ident = parse_beatport_id(found.get("source_url")) or parse_beatport_id(found.get("beatport_id"))
+    if ident:
+        found["beatport_id"] = ident
+        if "beatport.com/track/" not in clean(found.get("source_url")):
+            found["source_url"] = f"https://www.beatport.com/track/{ident}"
     url = clean(found.get("source_url"))
-    label = _source_label(url)
+    label = _source_label(url, ident or "")
     if not useful:
         stats.missed += 1
         flog("muted", f"Nincs találat: {path.name}")
