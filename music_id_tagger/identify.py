@@ -86,7 +86,7 @@ def identify_acoustid(path: Path, api_key: str) -> dict[str, Any] | None:
     import acoustid
     import musicbrainzngs
 
-    musicbrainzngs.set_useragent("MusicIDTagger", "1.0", "https://github.com")
+    musicbrainzngs.set_useragent("MusicIDTagger", "1.1", "https://github.com/robertvarga0123-design/music-id-tagger")
     try:
         results = list(acoustid.match(api_key, str(path)))
     except acoustid.NoBackendError as exc:

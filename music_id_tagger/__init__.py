@@ -1,3 +1,3 @@
-"""Music ID Tagger: Shazam hangminta + Beatport v4 + opcionális AcoustID."""
+"""Music ID Tagger: Shazam, Beatport, Spotify, Deezer, Apple, MusicBrainz."""
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"

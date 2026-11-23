@@ -184,7 +184,6 @@ class SpotifyClient:
         return body if isinstance(body, dict) else None
 
     def _get(self, path: str, params: dict):
-        try:
-            return self.session.get(API + path, params=params or None, headers=self._headers(), timeout=20)
-        except Exception:
-            return None
+        from music_id_tagger.net import session_get
+
+        return session_get(self.session, API + path, params=params or None, headers=self._headers())

@@ -25,8 +25,12 @@ _STATE = {
     "wait": "Vár",
     "run": "Folyamatban",
     "shazam": "Shazam…",
+    "acoustid": "AcoustID…",
     "beatport": "Beatport…",
     "spotify": "Spotify…",
+    "deezer": "Deezer…",
+    "apple": "Apple…",
+    "musicbrainz": "MusicBrainz…",
     "write": "Írás…",
     "ok": "Kész",
     "unsure": "! Bizonytalan",
@@ -125,14 +129,18 @@ class App(tk.Tk):
         self.tree.heading("state", text="Hol tart")
         self.tree.heading("source", text="Forrás")
         self.tree.column("file", width=280, stretch=True)
-        self.tree.column("state", width=130, stretch=False, anchor="w")
+        self.tree.column("state", width=150, stretch=False, anchor="w")
         self.tree.column("source", width=140, stretch=False, anchor="w")
         for name, color in (
             ("ok", INK),
             ("run", BRASS),
             ("shazam", BRASS),
+            ("acoustid", BRASS),
             ("beatport", BRASS),
             ("spotify", BRASS),
+            ("deezer", BRASS),
+            ("apple", BRASS),
+            ("musicbrainz", BRASS),
             ("write", BRASS),
             ("wait", MUTED),
             ("unsure", WARN),
@@ -165,12 +173,14 @@ class App(tk.Tk):
         self.use_shazam = tk.BooleanVar(value=True)
         self.use_beatport = tk.BooleanVar(value=True)
         self.use_spotify = tk.BooleanVar(value=True)
+        self.use_open_catalogs = tk.BooleanVar(value=True)
         self.dry_run = tk.BooleanVar(value=True)
         self.keep_identity = tk.BooleanVar(value=True)
         self.embed_cover = tk.BooleanVar(value=True)
         self.write_bpm_to_xml = tk.BooleanVar(value=True)
         self._check(right, "Shazam hangminta", self.use_shazam)
         self._check(right, "Beatport (BPM, hangnem, stílus)", self.use_beatport)
+        self._check(right, "Deezer, Apple, MusicBrainz (kulcs nélkül)", self.use_open_catalogs)
         tk.Label(right, text="Beatport felhasználó", bg=PAPER, fg=MUTED).pack(anchor="w", padx=12, pady=(8, 0))
         self.user = self._entry(right)
         tk.Label(right, text="Jelszó  ·  erre a gépre emlékezik", bg=PAPER, fg=MUTED).pack(anchor="w", padx=12, pady=(8, 0))
@@ -396,6 +406,7 @@ class App(tk.Tk):
         self.use_shazam.set(bool(data.get("use_shazam", True)))
         self.use_beatport.set(bool(data.get("use_beatport", True)))
         self.use_spotify.set(bool(data.get("use_spotify", True)))
+        self.use_open_catalogs.set(bool(data.get("use_open_catalogs", True)))
         self.dry_run.set(bool(data.get("dry_run", True)))
         self.keep_identity.set(bool(data.get("keep_identity", True)))
         self.embed_cover.set(bool(data.get("embed_cover", True)))
@@ -419,6 +430,7 @@ class App(tk.Tk):
                 "use_shazam": self.use_shazam.get(),
                 "use_beatport": self.use_beatport.get(),
                 "use_spotify": self.use_spotify.get(),
+                "use_open_catalogs": self.use_open_catalogs.get(),
                 "dry_run": self.dry_run.get(),
                 "keep_identity": self.keep_identity.get(),
                 "embed_cover": self.embed_cover.get(),
@@ -433,8 +445,8 @@ class App(tk.Tk):
         if not self.paths:
             messagebox.showinfo("Music ID Tagger", "Előbb adj meg legalább egy mappát vagy fájlt.")
             return
-        if not self.use_shazam.get() and not self.use_beatport.get() and not self.use_spotify.get() and not self.acoustid.get().strip():
-            messagebox.showinfo("Music ID Tagger", "Kapcsolj be legalább egy forrást: Shazam, Beatport, Spotify vagy AcoustID.")
+        if not self.use_shazam.get() and not self.use_beatport.get() and not self.use_spotify.get() and not self.use_open_catalogs.get() and not self.acoustid.get().strip():
+            messagebox.showinfo("Music ID Tagger", "Kapcsolj be legalább egy forrást: Shazam, Beatport, Deezer/Apple/MusicBrainz, Spotify vagy AcoustID.")
             return
         self._persist()
         try:
@@ -456,6 +468,7 @@ class App(tk.Tk):
             delay=delay,
             beatport_by_file=dict(self.beatport_links),
             write_bpm_to_xml=self.write_bpm_to_xml.get(),
+            use_open_catalogs=self.use_open_catalogs.get(),
         )
         self.cancel = threading.Event()
         self.urls.clear()

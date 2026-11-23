@@ -333,32 +333,29 @@ class BeatportClient:
         return meta
 
     def _get_path(self, path: str):
-        try:
-            return self.session.get(
-                f"{API}{path}",
-                headers={"Authorization": f"Bearer {self.access_token}"},
-                timeout=20,
-            )
-        except Exception:
-            return None
+        from music_id_tagger.net import session_get
+
+        return session_get(
+            self.session,
+            f"{API}{path}",
+            headers={"Authorization": f"Bearer {self.access_token}"},
+        )
 
     def _get_track(self, track_id: str):
-        try:
-            return self.session.get(
-                f"{API}/v4/catalog/tracks/{track_id}/",
-                headers={"Authorization": f"Bearer {self.access_token}"},
-                timeout=20,
-            )
-        except Exception:
-            return None
+        from music_id_tagger.net import session_get
+
+        return session_get(
+            self.session,
+            f"{API}/v4/catalog/tracks/{track_id}/",
+            headers={"Authorization": f"Bearer {self.access_token}"},
+        )
 
     def _get_search(self, query: str):
-        try:
-            return self.session.get(
-                f"{API}/v4/catalog/search/",
-                params={"q": query, "type": "tracks", "per_page": 10},
-                headers={"Authorization": f"Bearer {self.access_token}"},
-                timeout=20,
-            )
-        except Exception:
-            return None
+        from music_id_tagger.net import session_get
+
+        return session_get(
+            self.session,
+            f"{API}/v4/catalog/search/",
+            params={"q": query, "type": "tracks", "per_page": 10},
+            headers={"Authorization": f"Bearer {self.access_token}"},
+        )

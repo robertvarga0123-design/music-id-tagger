@@ -24,6 +24,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--overwrite-identity", action="store_true", help="A meglévő címet és előadót is cseréli")
     parser.add_argument("--no-cover", action="store_true")
     parser.add_argument("--no-xml-bpm", action="store_true", help="A Rekordbox XML BPM mezőit nem írja")
+    parser.add_argument("--no-catalogs", action="store_true", help="Deezer, Apple és MusicBrainz kihagyása")
     parser.add_argument("--delay", type=float, default=1.0)
     args = parser.parse_args(argv)
 
@@ -58,6 +59,7 @@ def main(argv: list[str] | None = None) -> int:
         embed_cover=not args.no_cover,
         delay=args.delay,
         write_bpm_to_xml=not args.no_xml_bpm,
+        use_open_catalogs=not args.no_catalogs,
     )
 
     stats = run(args.paths, options, log, lambda done, total: None, threading.Event())
