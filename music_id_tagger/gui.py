@@ -22,8 +22,12 @@ WARN = "#f2c14e"
 LINK = "#9ec1ff"
 
 _STATE = {
-    "wait": "Várakozik",
-    "run": "Keres…",
+    "wait": "Vár",
+    "run": "Folyamatban",
+    "shazam": "Shazam…",
+    "beatport": "Beatport…",
+    "spotify": "Spotify…",
+    "write": "Írás…",
     "ok": "Kész",
     "unsure": "! Bizonytalan",
     "missed": "! Nincs találat",
@@ -44,6 +48,7 @@ class App(tk.Tk):
         self.paths: list[str] = []
         self.beatport_links: dict[str, str] = {}
         self.rows: dict[str, str] = {}
+        self.row_paths: dict[str, str] = {}
         self.urls: dict[str, str] = {}
         self._fonts: list[tkfont.Font] = []
         self._build()
@@ -85,21 +90,61 @@ class App(tk.Tk):
         )
         tk.Label(
             left,
-            text="Húzd ide a mappát, a zenét vagy a Rekordbox XML-t.",
+            text="A szám mellett látszik, hol tart. A sárga ! bizonytalan.",
             bg=PAPER,
             fg=MUTED,
         ).pack(anchor="w", padx=12, pady=(0, 6))
-        self.listbox = tk.Listbox(
-            left,
-            bg=ENTRY,
-            fg=INK,
-            selectbackground=BRASS,
-            selectforeground=BG,
-            highlightthickness=0,
-            relief="flat",
-            activestyle="none",
+        style = ttk.Style(self)
+        style.theme_use("clam")
+        style.configure(
+            "Tracks.Treeview",
+            background=ENTRY,
+            fieldbackground=ENTRY,
+            foreground=INK,
+            borderwidth=0,
+            rowheight=28,
+            font=str(self._face(10)),
         )
-        self.listbox.pack(fill="both", expand=True, padx=12, pady=(0, 8))
+        style.configure(
+            "Tracks.Treeview.Heading",
+            background=PAPER,
+            foreground=MUTED,
+            relief="flat",
+            font=str(self._face(10, True)),
+        )
+        style.map("Tracks.Treeview", background=[("selected", "#3a3424")], foreground=[("selected", INK)])
+        list_wrap = tk.Frame(left, bg=PAPER)
+        list_wrap.pack(fill="both", expand=True, padx=12, pady=(0, 8))
+        self.tree = ttk.Treeview(
+            list_wrap,
+            columns=("file", "state", "source"),
+            show="headings",
+            style="Tracks.Treeview",
+        )
+        self.tree.heading("file", text="Fájl")
+        self.tree.heading("state", text="Hol tart")
+        self.tree.heading("source", text="Forrás")
+        self.tree.column("file", width=280, stretch=True)
+        self.tree.column("state", width=130, stretch=False, anchor="w")
+        self.tree.column("source", width=140, stretch=False, anchor="w")
+        for name, color in (
+            ("ok", INK),
+            ("run", BRASS),
+            ("shazam", BRASS),
+            ("beatport", BRASS),
+            ("spotify", BRASS),
+            ("write", BRASS),
+            ("wait", MUTED),
+            ("unsure", WARN),
+            ("missed", WARN),
+            ("bad", CLAY),
+        ):
+            self.tree.tag_configure(name, foreground=color)
+        scroll = ttk.Scrollbar(list_wrap, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=scroll.set)
+        self.tree.pack(side="left", fill="both", expand=True)
+        scroll.pack(side="right", fill="y")
+        self.tree.bind("<ButtonRelease-1>", self._open_source)
         buttons = tk.Frame(left, bg=PAPER)
         buttons.pack(fill="x", padx=12, pady=(0, 12))
         self._button(buttons, "Mappa", self._add_folder, BRASS).pack(side="left", padx=(0, 6))
@@ -156,7 +201,6 @@ class App(tk.Tk):
         bar_row = tk.Frame(foot, bg=BG)
         bar_row.pack(fill="x")
         style = ttk.Style(self)
-        style.theme_use("clam")
         style.configure(
             "Brass.Horizontal.TProgressbar",
             troughcolor=ENTRY,
@@ -177,53 +221,6 @@ class App(tk.Tk):
         self.stop_btn = self._button(actions, "Megállítás", self._stop, CLAY)
         self.stop_btn.pack(side="left")
         self.stop_btn.configure(state="disabled")
-
-        style.configure(
-            "Tracks.Treeview",
-            background=ENTRY,
-            fieldbackground=ENTRY,
-            foreground=INK,
-            borderwidth=0,
-            rowheight=28,
-            font=str(self._face(10)),
-        )
-        style.configure(
-            "Tracks.Treeview.Heading",
-            background=PAPER,
-            foreground=MUTED,
-            relief="flat",
-            font=str(self._face(10, True)),
-        )
-        style.map("Tracks.Treeview", background=[("selected", "#3a3424")], foreground=[("selected", INK)])
-        list_wrap = tk.Frame(foot, bg=BG)
-        list_wrap.pack(fill="both", expand=True, pady=(0, 8))
-        self.tree = ttk.Treeview(
-            list_wrap,
-            columns=("file", "state", "found", "source"),
-            show="headings",
-            style="Tracks.Treeview",
-            height=8,
-        )
-        self.tree.heading("file", text="Fájl")
-        self.tree.heading("state", text="Állapot")
-        self.tree.heading("found", text="Találat")
-        self.tree.heading("source", text="Forrás")
-        self.tree.column("file", width=260, stretch=True)
-        self.tree.column("state", width=140, stretch=False, anchor="w")
-        self.tree.column("found", width=280, stretch=True)
-        self.tree.column("source", width=110, stretch=False, anchor="w")
-        self.tree.tag_configure("ok", foreground=INK)
-        self.tree.tag_configure("run", foreground=BRASS)
-        self.tree.tag_configure("wait", foreground=MUTED)
-        self.tree.tag_configure("unsure", foreground=WARN)
-        self.tree.tag_configure("missed", foreground=WARN)
-        self.tree.tag_configure("bad", foreground=CLAY)
-        self.tree.tag_configure("link", foreground=LINK)
-        scroll = ttk.Scrollbar(list_wrap, orient="vertical", command=self.tree.yview)
-        self.tree.configure(yscrollcommand=scroll.set)
-        self.tree.pack(side="left", fill="both", expand=True)
-        scroll.pack(side="right", fill="y")
-        self.tree.bind("<ButtonRelease-1>", self._open_source)
 
         self.log = tk.Text(
             foot,
@@ -312,7 +309,7 @@ class App(tk.Tk):
             from music_id_tagger.dropfiles import hook_dropfiles
 
             hook_dropfiles(self, self._on_drop)
-            hook_dropfiles(self.listbox, self._on_drop)
+            hook_dropfiles(self.tree, self._on_drop)
         except Exception:
             return
 
@@ -341,34 +338,44 @@ class App(tk.Tk):
         self.bp_link.delete(0, "end")
 
     def _store_beatport(self, ident: str) -> None:
-        selected = self.listbox.curselection()
+        selected = self.tree.selection()
         if not selected:
             messagebox.showinfo("Music ID Tagger", "Előbb jelöld ki a fájlt, amihez ez a Beatport ID tartozik.")
             return
-        index = selected[0]
-        path = self.paths[index]
+        iid = selected[0]
+        path = self.row_paths.get(iid, "")
+        if not path:
+            return
         self.beatport_links[path] = ident
-        self._show_path(index)
+        self._paint(iid, path, "Vár", f"BP {ident}", "wait")
 
     def _add_path(self, path: str) -> None:
-        if path not in self.paths:
-            self.paths.append(path)
-            self.listbox.insert("end", path)
+        if path in self.paths:
+            return
+        self.paths.append(path)
+        name = Path(path).name or path
+        iid = self.tree.insert("", "end", values=(name, "Vár", ""), tags=("wait",))
+        self.row_paths[iid] = path
+        self.rows[path] = iid
+        try:
+            self.rows[str(Path(path).resolve())] = iid
+        except OSError:
+            pass
+        self.tree.see(iid)
 
-    def _show_path(self, index: int) -> None:
-        path = self.paths[index]
-        ident = self.beatport_links.get(path, "")
-        label = f"{path}    BP {ident}" if ident else path
-        self.listbox.delete(index)
-        self.listbox.insert(index, label)
-        self.listbox.selection_set(index)
+    def _paint(self, iid: str, path: str, state: str, source: str, tag: str) -> None:
+        name = Path(path).name or path
+        self.tree.item(iid, values=(name, state, source), tags=(tag,))
 
     def _remove(self) -> None:
-        selected = list(self.listbox.curselection())
-        for index in reversed(selected):
-            self.beatport_links.pop(self.paths[index], None)
-            self.listbox.delete(index)
-            del self.paths[index]
+        for iid in self.tree.selection():
+            path = self.row_paths.pop(iid, "")
+            if path:
+                self.beatport_links.pop(path, None)
+                if path in self.paths:
+                    self.paths.remove(path)
+            self.rows = {key: value for key, value in self.rows.items() if value != iid}
+            self.tree.delete(iid)
 
     def _load(self) -> None:
         data = load_settings()
@@ -445,9 +452,11 @@ class App(tk.Tk):
             beatport_by_file=dict(self.beatport_links),
         )
         self.cancel = threading.Event()
-        self.rows.clear()
         self.urls.clear()
-        self.tree.delete(*self.tree.get_children())
+        for iid in self.tree.get_children():
+            path = self.row_paths.get(iid, "")
+            ident = self.beatport_links.get(path, "")
+            self.tree.item(iid, values=(Path(path).name if path else "", "Vár", f"BP {ident}" if ident else ""), tags=("wait",))
         self.start_btn.configure(state="disabled")
         self.stop_btn.configure(state="normal")
         self._write("info", "Indul.")
@@ -510,13 +519,25 @@ class App(tk.Tk):
             url = ""
             link = ""
         tag = "unsure" if state in {"unsure", "missed"} else "bad" if state == "failed" else state if state in _STATE else "ok"
-        values = (name, _STATE.get(state, state), detail, link)
+        label = _STATE.get(state, state)
         iid = self.rows.get(key)
+        if not iid or not self.tree.exists(iid):
+            for child in self.tree.get_children():
+                values = self.tree.item(child, "values")
+                if values and values[0] == name:
+                    iid = child
+                    self.rows[key] = iid
+                    break
+            else:
+                iid = ""
         if iid and self.tree.exists(iid):
-            self.tree.item(iid, values=values, tags=(tag,))
+            current = self.tree.item(iid, "values")
+            source = link or (current[2] if len(current) > 2 else "")
+            self.tree.item(iid, values=(name, label, source), tags=(tag,))
         else:
-            iid = self.tree.insert("", "end", values=values, tags=(tag,))
+            iid = self.tree.insert("", "end", values=(name, label, link), tags=(tag,))
             self.rows[key] = iid
+            self.row_paths.setdefault(iid, key)
         self.urls[iid] = url
         self.tree.see(iid)
 
@@ -524,7 +545,7 @@ class App(tk.Tk):
         iid = self.tree.identify_row(event.y)
         column = self.tree.identify_column(event.x)
         url = self.urls.get(iid, "")
-        if column == "#4" and url.startswith("https://"):
+        if column == "#3" and url.startswith("https://"):
             webbrowser.open(url)
 
     def _write(self, level: str, text: str) -> None:

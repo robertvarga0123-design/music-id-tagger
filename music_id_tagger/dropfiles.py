@@ -1,4 +1,4 @@
-"""Windows file drop for the Tk window. No-op anywhere else."""
+"""Windows file drop. Leaves Tk's own window procedure alone, so a drop cannot freeze the app."""
 
 from __future__ import annotations
 
@@ -12,46 +12,69 @@ def hook_dropfiles(widget, callback: Callable[[list[str]], None]) -> None:
     import ctypes
     from ctypes import wintypes
 
-    hwnd = wintypes.HWND(widget.winfo_id())
-    WM_DROPFILES = 0x0233
-    GWLP_WNDPROC = -4
-    LRESULT = ctypes.c_ssize_t
-    WPARAM = ctypes.c_size_t
-    LPARAM = ctypes.c_ssize_t
-    prototype = ctypes.WINFUNCTYPE(LRESULT, wintypes.HWND, wintypes.UINT, WPARAM, LPARAM)
+    hwnd = widget.winfo_id()
+    if not hwnd:
+        return
 
+    WM_DROPFILES = 0x0233
     user32 = ctypes.windll.user32
     shell32 = ctypes.windll.shell32
-    user32.GetWindowLongPtrW.restype = ctypes.c_void_p
-    user32.GetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int]
-    user32.SetWindowLongPtrW.restype = ctypes.c_void_p
-    user32.SetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_void_p]
-    user32.CallWindowProcW.restype = LRESULT
-    user32.CallWindowProcW.argtypes = [ctypes.c_void_p, wintypes.HWND, wintypes.UINT, WPARAM, LPARAM]
+    comctl = ctypes.windll.comctl32
+
+    shell32.DragQueryFileW.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_wchar_p, ctypes.c_uint]
+    shell32.DragQueryFileW.restype = ctypes.c_uint
+    shell32.DragFinish.argtypes = [ctypes.c_void_p]
     shell32.DragAcceptFiles.argtypes = [wintypes.HWND, wintypes.BOOL]
-    shell32.DragQueryFileW.argtypes = [wintypes.HANDLE, wintypes.UINT, wintypes.LPWSTR, wintypes.UINT]
-    shell32.DragQueryFileW.restype = wintypes.UINT
-    shell32.DragFinish.argtypes = [wintypes.HANDLE]
 
-    previous = user32.GetWindowLongPtrW(hwnd, GWLP_WNDPROC)
+    prototype = ctypes.WINFUNCTYPE(
+        ctypes.c_ssize_t,
+        wintypes.HWND,
+        wintypes.UINT,
+        ctypes.c_size_t,
+        ctypes.c_ssize_t,
+        ctypes.c_size_t,
+        ctypes.c_ssize_t,
+    )
+    comctl.SetWindowSubclass.argtypes = [wintypes.HWND, prototype, ctypes.c_size_t, ctypes.c_ssize_t]
+    comctl.SetWindowSubclass.restype = wintypes.BOOL
+    comctl.DefSubclassProc.argtypes = [wintypes.HWND, wintypes.UINT, ctypes.c_size_t, ctypes.c_ssize_t]
+    comctl.DefSubclassProc.restype = ctypes.c_ssize_t
 
-    def handler(window, msg, wparam, lparam):
+    def read_paths(handle) -> list[str]:
+        count = shell32.DragQueryFileW(handle, 0xFFFFFFFF, None, 0)
+        found: list[str] = []
+        for index in range(int(count)):
+            length = shell32.DragQueryFileW(handle, index, None, 0)
+            buf = ctypes.create_unicode_buffer(int(length) + 1)
+            shell32.DragQueryFileW(handle, index, buf, int(length) + 1)
+            if buf.value:
+                found.append(buf.value)
+        return found
+
+    def handler(window, msg, wparam, lparam, uid, data):
         if msg == WM_DROPFILES:
-            count = shell32.DragQueryFileW(wparam, 0xFFFFFFFF, None, 0)
             paths: list[str] = []
-            for index in range(count):
-                length = shell32.DragQueryFileW(wparam, index, None, 0)
-                buf = ctypes.create_unicode_buffer(length + 1)
-                shell32.DragQueryFileW(wparam, index, buf, length + 1)
-                if buf.value:
-                    paths.append(buf.value)
-            shell32.DragFinish(wparam)
+            try:
+                paths = read_paths(wparam)
+            except Exception:
+                paths = []
+            try:
+                shell32.DragFinish(wparam)
+            except Exception:
+                pass
             if paths:
-                widget.after(0, lambda found=paths: callback(found))
+                try:
+                    widget.after(0, lambda found=list(paths): callback(found))
+                except Exception:
+                    pass
             return 0
-        return user32.CallWindowProcW(previous, window, msg, wparam, lparam)
+        try:
+            return comctl.DefSubclassProc(window, msg, wparam, lparam)
+        except Exception:
+            return 0
 
     proc = prototype(handler)
     widget._drop_proc = proc
-    user32.SetWindowLongPtrW(hwnd, GWLP_WNDPROC, ctypes.cast(proc, ctypes.c_void_p))
+    if not comctl.SetWindowSubclass(hwnd, proc, 1, 0):
+        return
     shell32.DragAcceptFiles(hwnd, True)

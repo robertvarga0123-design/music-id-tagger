@@ -286,6 +286,62 @@ class BeatportClient:
         meta["source_url"] = meta.get("source_url") or f"https://www.beatport.com/track/{ident}"
         return meta
 
+    def by_isrc(self, isrc: str, log: Callable[[str, str], None] | None = None) -> dict[str, Any] | None:
+        code = re.sub(r"[^A-Za-z0-9]", "", clean(isrc)).upper()
+        if not self.access_token or len(code) < 12:
+            return None
+        response = self._get_path(f"/v4/catalog/tracks/store/{code}/")
+        if response is not None and response.status_code == 401 and self._refresh():
+            response = self._get_path(f"/v4/catalog/tracks/store/{code}/")
+        if response is not None and response.status_code == 200:
+            meta = self._meta_from_body(response.json(), log)
+            if meta:
+                meta["match_score"] = 100
+                return meta
+        response = self._get_search(code)
+        if response is None or response.status_code != 200:
+            return None
+        data = response.json()
+        tracks = data.get("tracks") or data.get("results") or []
+        if isinstance(tracks, dict):
+            tracks = tracks.get("data") or tracks.get("results") or []
+        for track in tracks:
+            if not isinstance(track, dict):
+                continue
+            got = re.sub(r"[^A-Za-z0-9]", "", clean(track.get("isrc"))).upper()
+            if got and got == code:
+                meta = normalize_track(track)
+                meta["match_score"] = 100
+                ident = parse_beatport_id(meta.get("source_url")) or parse_beatport_id(meta.get("beatport_id"))
+                if ident:
+                    meta["beatport_id"] = ident
+                return meta
+        return None
+
+    def _meta_from_body(self, body, log):
+        track = body if isinstance(body, dict) and (body.get("name") or body.get("artists")) else None
+        if track is None and isinstance(body, dict):
+            ident = parse_beatport_id(body.get("url") or body.get("id"))
+            if ident:
+                return self.by_id(ident, log)
+        if not isinstance(track, dict):
+            return None
+        meta = normalize_track(track)
+        ident = parse_beatport_id(meta.get("source_url")) or parse_beatport_id(meta.get("beatport_id"))
+        if ident:
+            meta["beatport_id"] = ident
+        return meta
+
+    def _get_path(self, path: str):
+        try:
+            return self.session.get(
+                f"{API}{path}",
+                headers={"Authorization": f"Bearer {self.access_token}"},
+                timeout=20,
+            )
+        except Exception:
+            return None
+
     def _get_track(self, track_id: str):
         try:
             return self.session.get(

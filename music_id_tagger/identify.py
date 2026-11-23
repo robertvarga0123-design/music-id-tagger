@@ -67,6 +67,7 @@ def shazam_to_meta(payload: Any) -> dict[str, Any] | None:
         "label": fields.get("label"),
         "year": year_from(fields.get("released") or fields.get("release date")),
         "genre": genre,
+        "isrc": fields.get("isrc"),
         "cover_url": cover or None,
         "shazam_id": track.get("key"),
         "source_url": _shazam_url(track),

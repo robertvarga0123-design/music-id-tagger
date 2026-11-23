@@ -407,7 +407,12 @@ async def _one(path: Path, options: Options, beatport, spotify, shazam, log: Log
 
     existing = read_tags(path)
     found: dict = {}
+
+    def stage(name: str) -> None:
+        _emit(track, _file_key(path), path.name, name, "", "", "")
+
     if shazam is not None:
+        stage("shazam")
         try:
             from music_id_tagger.identify import recognize_shazam
 
@@ -463,7 +468,38 @@ async def _one(path: Path, options: Options, beatport, spotify, shazam, log: Log
             guessed = False
             flog("ok", f"Beatport ID {forced}: {clean(hit.get('artist'))} - {clean(hit.get('title'))}")
 
+    isrc = clean(found.get("isrc"))
+    if beatport is not None and isrc and not found.get("beatport_id"):
+        stage("beatport")
+        hit = await asyncio.to_thread(beatport.by_isrc, isrc, flog)
+        if hit:
+            for key in (
+                "title",
+                "artist",
+                "genre",
+                "bpm",
+                "key",
+                "key_name",
+                "label",
+                "beatport_id",
+                "isrc",
+                "mix",
+                "catalog",
+                "cover_url",
+                "album",
+                "year",
+                "source_url",
+            ):
+                if hit.get(key):
+                    found[key] = hit[key]
+            found["match_score"] = 100
+            previous = found.get("source")
+            found["source"] = "beatport" if not previous else f"{previous}+beatport"
+            guessed = False
+            flog("ok", f"Beatport ID a hangmintából: {found.get('beatport_id')} — {clean(hit.get('artist'))} - {clean(hit.get('title'))}")
+
     if spotify is not None and query_artist and query_title:
+        stage("spotify")
         hit = await asyncio.to_thread(spotify.search, query_artist, query_title, flog)
         if hit:
             if guessed and not found.get("title"):
@@ -482,6 +518,7 @@ async def _one(path: Path, options: Options, beatport, spotify, shazam, log: Log
             flog("ok", f"Spotify: {clean(hit.get('artist'))} - {clean(hit.get('title'))} | {hit.get('isrc') or 'nincs ISRC'}")
 
     if beatport is not None and query_artist and query_title and not found.get("beatport_id"):
+        stage("beatport")
         hit = await asyncio.to_thread(beatport.search, query_artist, query_title, flog)
         if hit:
             if guessed and not found.get("title"):
@@ -549,6 +586,7 @@ async def _one(path: Path, options: Options, beatport, spotify, shazam, log: Log
     if unsure:
         flog("muted", f"Bizonytalan találat, nézd meg a forrást: {path.name}")
     prefix = "PRÓBA" if options.dry_run else "ÍRVA"
+    stage("write")
     try:
         await asyncio.to_thread(write_tags, path, final, options.dry_run, options.embed_cover)
     except Exception as exc:
