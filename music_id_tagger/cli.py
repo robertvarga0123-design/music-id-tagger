@@ -10,7 +10,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Shazam hangminta + Beatport v4 tagger. A jelszót sehova nem menti."
     )
-    parser.add_argument("paths", nargs="+", help="Mappák vagy fájlok")
+    parser.add_argument("paths", nargs="*", help="Mappák vagy fájlok")
+    parser.add_argument("--undo", default="", help="Egy undo JSON visszaállítása")
     parser.add_argument("--beatport-user", default="", help="Beatport felhasználónév")
     parser.add_argument("--beatport-pass", default="", help="Beatport jelszó, csak erre a futásra")
     parser.add_argument("--acoustid-key", default="", help="Opcionális AcoustID kulcs")
@@ -22,8 +23,26 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--write", action="store_true", help="Tényleg írja a tageket. Enélkül csak próba.")
     parser.add_argument("--overwrite-identity", action="store_true", help="A meglévő címet és előadót is cseréli")
     parser.add_argument("--no-cover", action="store_true")
+    parser.add_argument("--no-xml-bpm", action="store_true", help="A Rekordbox XML BPM mezőit nem írja")
     parser.add_argument("--delay", type=float, default=1.0)
     args = parser.parse_args(argv)
+
+    def log(level: str, text: str) -> None:
+        print(f"[{level}] {text}", flush=True)
+
+    if args.undo:
+        from pathlib import Path
+
+        from music_id_tagger.undo import revert
+
+        def confirm(path: Path) -> bool:
+            answer = input(f"{path} megváltozott a címkézés óta. Visszaállítsam? [i/n] ")
+            return answer.strip().lower() in {"i", "igen", "y", "yes"}
+
+        revert(Path(args.undo), log, confirm)
+        return 0
+    if not args.paths:
+        parser.error("adj meg legalább egy mappát vagy fájlt")
 
     options = Options(
         use_shazam=not args.no_shazam,
@@ -38,10 +57,8 @@ def main(argv: list[str] | None = None) -> int:
         keep_identity=not args.overwrite_identity,
         embed_cover=not args.no_cover,
         delay=args.delay,
+        write_bpm_to_xml=not args.no_xml_bpm,
     )
-
-    def log(level: str, text: str) -> None:
-        print(f"[{level}] {text}", flush=True)
 
     stats = run(args.paths, options, log, lambda done, total: None, threading.Event())
     return 0 if stats.failed == 0 else 1

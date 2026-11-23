@@ -29,6 +29,7 @@ class Options:
     embed_cover: bool = True
     delay: float = 1.0
     beatport_by_file: dict = field(default_factory=dict)
+    write_bpm_to_xml: bool = True
 
 
 @dataclass
@@ -174,14 +175,23 @@ def _blank(value) -> bool:
 
 
 def apply_meta(existing: dict, incoming: dict, keep_identity: bool) -> dict:
+    """Meglévő és új tagek egyesítése.
+
+    A műfaj csak akkor írja felül a már bent lévőt, ha az új adat forrása
+    Beatport, vagy ha a fájlban üres a műfaj. A Shazam általános műfaja
+    (például "Electronic") nem cserélhet le egy meglévő DJ-műfajt.
+    """
     merged = dict(existing)
     identity = {"title", "artist", "album"}
+    beatport_source = "beatport" in clean(incoming.get("source")).lower()
     for key, value in incoming.items():
         if key in {"source", "match_score", "score", "shazam_id"} or value in (None, ""):
             continue
         if key in identity and keep_identity and not _blank(existing.get(key)):
             continue
         if key == "year" and keep_identity and not _blank(existing.get(key)):
+            continue
+        if key == "genre" and not _blank(existing.get(key)) and not beatport_source:
             continue
         merged[key] = value
     sources = [item for item in (existing.get("source"), incoming.get("source")) if item]
@@ -275,7 +285,24 @@ def run(
     cancel,
     track: Callable[[dict], None] | None = None,
 ) -> Stats:
-    from music_id_tagger.rekordbox import audio_from_xml, collect_xml, path_key, update_library
+    from music_id_tagger.undo import begin_run, commit_run
+
+    begin_run()
+    try:
+        return _run(paths, options, log, progress, cancel, track)
+    finally:
+        commit_run()
+
+
+def _run(
+    paths: list[str],
+    options: Options,
+    log: LogFn,
+    progress: ProgressFn,
+    cancel,
+    track: Callable[[dict], None] | None = None,
+) -> Stats:
+    from music_id_tagger.rekordbox import audio_from_xml, collect_xml, update_library
 
     stats = Stats()
     xmls = collect_xml(paths)
@@ -335,7 +362,9 @@ def run(
     else:
         for xml in xmls:
             try:
-                changed, missing, notes = update_library(xml, stats.by_path, options.keep_identity, options.dry_run)
+                changed, missing, notes = update_library(
+                    xml, stats.by_path, options.keep_identity, options.dry_run, options.write_bpm_to_xml
+                )
             except Exception as exc:
                 stats.failed += 1
                 log("err", f"Rekordbox XML hiba ({xml.name}): {exc}")

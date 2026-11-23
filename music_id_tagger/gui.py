@@ -168,6 +168,7 @@ class App(tk.Tk):
         self.dry_run = tk.BooleanVar(value=True)
         self.keep_identity = tk.BooleanVar(value=True)
         self.embed_cover = tk.BooleanVar(value=True)
+        self.write_bpm_to_xml = tk.BooleanVar(value=True)
         self._check(right, "Shazam hangminta", self.use_shazam)
         self._check(right, "Beatport (BPM, hangnem, stílus)", self.use_beatport)
         tk.Label(right, text="Beatport felhasználó", bg=PAPER, fg=MUTED).pack(anchor="w", padx=12, pady=(8, 0))
@@ -186,6 +187,7 @@ class App(tk.Tk):
         self._check(right, "Próba: ne írjon a fájlokba", self.dry_run)
         self._check(right, "Meglévő címet és előadót hagyja", self.keep_identity)
         self._check(right, "Borító mentése, ha még nincs", self.embed_cover)
+        self._check(right, "Rekordbox XML BPM frissítése", self.write_bpm_to_xml)
         delay_row = tk.Frame(right, bg=PAPER)
         delay_row.pack(fill="x", padx=12, pady=(8, 12))
         tk.Label(delay_row, text="Szünet a fájlok között (mp)", bg=PAPER, fg=MUTED).pack(side="left")
@@ -218,6 +220,7 @@ class App(tk.Tk):
         actions.pack(fill="x", pady=(8, 8))
         self.start_btn = self._button(actions, "Indítás", self._start, BRASS)
         self.start_btn.pack(side="left", padx=(0, 8))
+        self._button(actions, "Visszavonás", self._undo, PAPER).pack(side="left", padx=(0, 8))
         self.stop_btn = self._button(actions, "Megállítás", self._stop, CLAY)
         self.stop_btn.pack(side="left")
         self.stop_btn.configure(state="disabled")
@@ -396,6 +399,7 @@ class App(tk.Tk):
         self.dry_run.set(bool(data.get("dry_run", True)))
         self.keep_identity.set(bool(data.get("keep_identity", True)))
         self.embed_cover.set(bool(data.get("embed_cover", True)))
+        self.write_bpm_to_xml.set(bool(data.get("write_bpm_to_xml", True)))
         if data.get("delay") is not None:
             self.delay.delete(0, "end")
             self.delay.insert(0, str(data["delay"]))
@@ -418,6 +422,7 @@ class App(tk.Tk):
                 "dry_run": self.dry_run.get(),
                 "keep_identity": self.keep_identity.get(),
                 "embed_cover": self.embed_cover.get(),
+                "write_bpm_to_xml": self.write_bpm_to_xml.get(),
                 "delay": delay,
             }
         )
@@ -450,6 +455,7 @@ class App(tk.Tk):
             embed_cover=self.embed_cover.get(),
             delay=delay,
             beatport_by_file=dict(self.beatport_links),
+            write_bpm_to_xml=self.write_bpm_to_xml.get(),
         )
         self.cancel = threading.Event()
         self.urls.clear()
@@ -462,6 +468,42 @@ class App(tk.Tk):
         self._write("info", "Indul.")
         self.worker = threading.Thread(target=self._work, args=(options,), daemon=True)
         self.worker.start()
+
+    def _undo(self) -> None:
+        from music_id_tagger.undo import list_runs, revert
+
+        runs = list_runs()
+        if not runs:
+            messagebox.showinfo("Music ID Tagger", "Nincs visszavonható futás.")
+            return
+        dialog = tk.Toplevel(self)
+        dialog.title("Visszavonás")
+        dialog.configure(bg=BG)
+        dialog.geometry("520x280")
+        tk.Label(dialog, text="Melyik futást állítsam vissza?", bg=BG, fg=INK).pack(anchor="w", padx=12, pady=(12, 6))
+        box = tk.Listbox(dialog, bg=ENTRY, fg=INK, selectbackground=BRASS, selectforeground=BG, highlightthickness=0)
+        box.pack(fill="both", expand=True, padx=12, pady=(0, 8))
+        for saved in runs:
+            box.insert("end", saved.name)
+        box.selection_set(0)
+
+        def go() -> None:
+            selected = box.curselection()
+            if not selected:
+                return
+            target = runs[selected[0]]
+
+            def confirm(path) -> bool:
+                return messagebox.askyesno(
+                    "Visszavonás",
+                    f"{path.name} megváltozott a címkézés óta. Visszaállítsam?",
+                    parent=dialog,
+                )
+
+            revert(target, lambda level, text: self._write(level, text), confirm)
+            dialog.destroy()
+
+        self._button(dialog, "Kijelölt visszaállítása", go, BRASS).pack(pady=(0, 12))
 
     def _work(self, options: Options) -> None:
         stats = run(
@@ -520,6 +562,9 @@ class App(tk.Tk):
             link = ""
         tag = "unsure" if state in {"unsure", "missed"} else "bad" if state == "failed" else state if state in _STATE else "ok"
         label = _STATE.get(state, state)
+        source = link
+        if not source and detail and state in {"ok", "unsure", "missed", "failed"}:
+            source = detail
         iid = self.rows.get(key)
         if not iid or not self.tree.exists(iid):
             for child in self.tree.get_children():
@@ -532,10 +577,11 @@ class App(tk.Tk):
                 iid = ""
         if iid and self.tree.exists(iid):
             current = self.tree.item(iid, "values")
-            source = link or (current[2] if len(current) > 2 else "")
+            if not source and len(current) > 2:
+                source = current[2]
             self.tree.item(iid, values=(name, label, source), tags=(tag,))
         else:
-            iid = self.tree.insert("", "end", values=(name, label, link), tags=(tag,))
+            iid = self.tree.insert("", "end", values=(name, label, source), tags=(tag,))
             self.rows[key] = iid
             self.row_paths.setdefault(iid, key)
         self.urls[iid] = url

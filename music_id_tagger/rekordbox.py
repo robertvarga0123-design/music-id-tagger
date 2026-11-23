@@ -113,17 +113,22 @@ def _tonality(meta: dict) -> str:
     return CAMELOT_TO_NAME.get(camelot, clean(meta.get("key")))
 
 
-def _bpm(value) -> str:
-    number = float(str(value).replace(",", "."))
-    return f"{number:.2f}"
-
-
 def _year(value) -> str:
     digits = "".join(ch for ch in clean(value) if ch.isdigit())
     return digits[:4]
 
 
-def apply_track(track: ET.Element, meta: dict, keep_identity: bool) -> list[str]:
+def _bpm_number(value) -> float | None:
+    text = clean(value).replace(",", ".")
+    if not text:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
+def apply_track(track: ET.Element, meta: dict, keep_identity: bool, write_bpm: bool = True) -> list[str]:
     """Update one TRACK element. Returns the lines that actually changed."""
     changes: list[str] = []
     identity = {"Name", "Artist", "Album"}
@@ -143,17 +148,17 @@ def apply_track(track: ET.Element, meta: dict, keep_identity: bool) -> list[str]
         previous = clean(track.get("Tonality"))
         track.set("Tonality", tone)
         changes.append(f"Tonality: {previous or '–'} → {tone}")
-    if meta.get("bpm"):
-        try:
-            bpm = _bpm(meta.get("bpm"))
-        except ValueError:
-            bpm = ""
-        if bpm and clean(track.get("AverageBpm")) != bpm:
+    if write_bpm and meta.get("bpm") not in (None, ""):
+        incoming = _bpm_number(meta.get("bpm"))
+        current = _bpm_number(track.get("AverageBpm"))
+        if incoming is not None and (current is None or abs(incoming - current) > 1.0):
+            text = f"{incoming:.2f}"
             previous = clean(track.get("AverageBpm"))
-            track.set("AverageBpm", bpm)
-            changes.append(f"AverageBpm: {previous or '–'} → {bpm}")
-            for tempo in track.findall("TEMPO"):
-                tempo.set("Bpm", bpm)
+            track.set("AverageBpm", text)
+            changes.append(f"AverageBpm: {previous or '–'} → {text}")
+            tempos = track.findall("TEMPO")
+            if len(tempos) == 1:
+                tempos[0].set("Bpm", text)
     ident = clean(meta.get("beatport_id"))
     if ident:
         stamp = f"Beatport ID: {ident}"
@@ -168,7 +173,13 @@ def path_key(path: Path) -> str:
     return os.path.normcase(str(path.resolve()))
 
 
-def update_library(path: Path, by_path: dict[str, dict], keep_identity: bool, dry_run: bool) -> tuple[int, int, list[str]]:
+def update_library(
+    path: Path,
+    by_path: dict[str, dict],
+    keep_identity: bool,
+    dry_run: bool,
+    write_bpm_to_xml: bool = True,
+) -> tuple[int, int, list[str]]:
     tree = ET.parse(path)
     root = tree.getroot()
     changed = 0
@@ -185,7 +196,7 @@ def update_library(path: Path, by_path: dict[str, dict], keep_identity: bool, dr
         if not meta:
             continue
         who = clean(track.get("Artist")) or clean(track.get("Name")) or location.name
-        diffs = apply_track(track, meta, keep_identity)
+        diffs = apply_track(track, meta, keep_identity, write_bpm=write_bpm_to_xml)
         if not diffs:
             continue
         changed += 1

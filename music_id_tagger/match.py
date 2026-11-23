@@ -20,6 +20,11 @@ _STOP = {
     "mix",
     "original",
     "extended",
+    "dj",
+    "mc",
+    "presents",
+    "pres",
+    "aka",
 }
 
 
@@ -76,7 +81,12 @@ def titles_compatible(query: str, name: str, mix: str = "") -> bool:
     got = _flat(name)
     if not wanted or not got:
         return False
-    if wanted == got or wanted in _flat(f"{name} {mix}") or got in wanted:
+    if wanted == got:
+        return True
+    # A short title such as "Go" must not match inside "Let It Go".
+    if len(wanted) < 4 or len(got) < 4:
+        return False
+    if wanted in _flat(f"{name} {mix}") or got in wanted:
         return True
     overlap = _tokens(wanted) & _tokens(got)
     query_tokens = _tokens(wanted)

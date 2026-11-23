@@ -1,0 +1,7 @@
+target-version = "py312"
+extend-exclude = ["build", "dist", "installer/Output"]
+
+# A széles ruff-alapértelmezés (BLE001, I, UP, S, TRY) a meglévő,
+# szándékos hibaelnyelést és stílust büntetné. A CI a valós hibákat nézi.
+[lint]
+select = ["E4", "E7", "E9", "F"]

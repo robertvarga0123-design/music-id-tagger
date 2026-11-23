@@ -17,7 +17,6 @@ def hook_dropfiles(widget, callback: Callable[[list[str]], None]) -> None:
         return
 
     WM_DROPFILES = 0x0233
-    user32 = ctypes.windll.user32
     shell32 = ctypes.windll.shell32
     comctl = ctypes.windll.comctl32
 
