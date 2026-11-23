@@ -280,17 +280,67 @@ def best_track(tracks: list, artist: str, title: str, minimum: int = 5) -> tuple
     return best, best_score
 
 
+def same_recording(artist: str, title: str, other_artist: str, other_title: str) -> bool:
+    """True when two names are the same track, not merely a shared word."""
+    if not clean(artist) or not clean(title) or not clean(other_artist) or not clean(other_title):
+        return False
+    return titles_compatible(title, other_title) and artists_compatible(artist, other_artist)
+
+
+def fingerprint_allowed(hit_artist: str, hit_title: str, existing: dict | None, filename: str) -> bool:
+    """A Shazam or AcoustID hit must agree with the filename and the tags, when those exist.
+
+    A file named ``Matt Guy - Chorale.mp3`` must not become ``bbno$ - check``.
+    If neither the tags nor the filename name a track, the fingerprint is the only clue.
+    """
+    anchors: list[tuple[str, str]] = []
+    tags = existing or {}
+    tag_artist = clean(tags.get("artist"))
+    tag_title = clean(tags.get("title"))
+    if tag_artist and tag_title:
+        anchors.append((tag_artist, tag_title))
+    parsed = parse_filename(filename or "")
+    if parsed:
+        anchors.append(parsed)
+    if not anchors:
+        return True
+    return all(same_recording(hit_artist, hit_title, artist, title) for artist, title in anchors)
+
+
+def search_identity(existing: dict | None, filename: str) -> tuple[str, str, str]:
+    """Local artist and title to search with.
+
+    Returns ``(artist, title, origin)``. Origin is ``tag``, ``file``,
+    ``conflict-file`` or ``""``. When the tag and the filename name different
+    tracks, the filename wins: a bad write must not hide the name on disk.
+    """
+    tags = existing or {}
+    tag_artist = clean(tags.get("artist"))
+    tag_title = clean(tags.get("title"))
+    parsed = parse_filename(filename or "")
+    has_tag = bool(tag_artist and tag_title)
+    if has_tag and parsed and not same_recording(tag_artist, tag_title, parsed[0], parsed[1]):
+        return parsed[0], parsed[1], "conflict-file"
+    if has_tag:
+        return tag_artist, tag_title, "tag"
+    if parsed:
+        return parsed[0], parsed[1], "file"
+    return "", "", ""
+
+
 def is_uncertain(meta: dict | None, guessed: bool = False) -> bool:
     """True when the hit should be checked by hand.
 
     A Shazam or AcoustID audio match plus a strong catalog score is sure.
-    A filename guess, a weak score, or no source at all is not.
+    A fingerprint with no catalog, a filename guess, a weak score, or no source is not.
     """
     data = meta or {}
     source = clean(data.get("source")).lower()
     audio = "shazam" in source or "acoustid" in source
     catalog = "beatport" in source or "spotify" in source
     if not audio and not catalog:
+        return True
+    if audio and not catalog:
         return True
     if guessed and not audio:
         return True

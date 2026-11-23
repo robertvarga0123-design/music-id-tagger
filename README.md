@@ -32,6 +32,8 @@ A „meglévő címet és előadót hagyja” pipa alapból be van kapcsolva. A 
 
 A program a fájl hosszát hasonlítja a katalógus hosszához. Ha a kettő 6 másodpercnél és a hosszabbik 4%-ánál is jobban eltér, a találatot eldobja: így az Original Mix nem kapja meg az Extended vagy a Radio adatát. Ha a fájlban már van borító, és a találat borítója szemmel láthatóan más, azt a találatot is kihagyja. Ha nincs hossz vagy nincs borító, ettől még nem veti el.
 
+A Shazam-találatot a fájlnévvel és a bent lévő taggel is összeveti. A `Matt Guy - Chorale.mp3` nem lehet `bbno$ - check`. Ha a kettő eltér, a hangmintát kihagyja, és a fájlnév alapján keres. Műfajt csak a Beatport ír: a Shazam „Dance / Pop” és az „Electronic” nem kerül a fájlba.
+
 Az Open Key (`1m`, `1d`) és a zenei nevek (`Amin`, `F# minor`) Camelot kódra váltanak, például `8A`. A Traxsource nyilvános keresője Cloudflare mögött van, a hivatalos API pedig csak meghívóra elérhető, ezért nincs bekötve. Automatikus hot cue és helyi BPM-elemzés sincs: ahhoz natív hangmotor kellene, az pedig széttörné a Windows telepítőt. A kézzel beírt Beatport linket akkor is használja, ha a hossz kicsit eltér.
 
 ## Amit ebből raktam össze

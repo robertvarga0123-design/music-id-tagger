@@ -16,7 +16,9 @@ def test_weak_catalog_score_is_uncertain():
     assert is_uncertain({"source": "shazam+beatport", "match_score": 6}, guessed=False) is True
 
 
-def test_miss_without_source_is_uncertain():
+def test_shazam_without_a_catalog_is_uncertain():
+    assert is_uncertain({"source": "shazam"}, guessed=False) is True
+    assert is_uncertain({"source": "shazam+deezer", "match_score": 18}, guessed=False) is True
     assert is_uncertain({}, guessed=False) is True
 
 

@@ -77,7 +77,7 @@ def test_shazam_genre_does_not_replace_existing():
     assert kept["genre"] == "Techno (Peak Time / Driving)"
     assert kept["title"] == "Régi"
     filled = apply_meta({"genre": ""}, {"genre": "Electronic", "source": "shazam"}, keep_identity=True)
-    assert filled["genre"] == "Electronic"
+    assert filled["genre"] == ""
     replaced = apply_meta(
         {"genre": "House"},
         {"genre": "Techno (Raw / Deep / Hypnotic)", "source": "shazam+beatport"},

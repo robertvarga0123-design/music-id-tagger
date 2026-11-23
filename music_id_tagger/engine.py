@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Callable
 
 from music_id_tagger.covers import cover_hash
-from music_id_tagger.match import clean, parse_filename, to_camelot
+from music_id_tagger.match import clean, search_identity, to_camelot
 from music_id_tagger.tags import AUDIO_EXTENSIONS, read_cover_bytes, read_duration, read_tags, write_tags
 
 LogFn = Callable[[str, str], None]
@@ -176,13 +176,27 @@ def _blank(value) -> bool:
     return not clean(value)
 
 
+def _without_consumer_genre(meta: dict) -> dict:
+    """Shazam and AcoustID genres are consumer labels, not DJ genres."""
+    cleaned = dict(meta)
+    cleaned.pop("genre", None)
+    return cleaned
+
+
+def _keep_fingerprint(meta: dict, existing: dict, filename: str) -> bool:
+    from music_id_tagger.match import fingerprint_allowed
+
+    return fingerprint_allowed(clean(meta.get("artist")), clean(meta.get("title")), existing, filename)
+
+
 def apply_meta(existing: dict, incoming: dict, keep_identity: bool) -> dict:
     """Meglévő és új tagek egyesítése.
 
-    A műfaj, a hangnem és a kiadó csak Beatport-forrásból írja felül a már
-    bent lévőt, vagy ha a mező üres. A Shazam „Electronic” és az Apple „Dance”
-    nem cserélhet le egy meglévő DJ-műfajt. A BPM-et nem Beatport-forrás csak
-    üres mezőbe írja, és a fele/duplája tempót (70 vs 140) senki nem írja felül.
+    A műfajt csak Beatport írja be. A Shazam „Dance / Pop” és az Apple „Dance”
+    nem DJ-stílus, üres mezőbe sem kerül. A hangnem és a kiadó csak
+    Beatport-forrásból írja felül a már bent lévőt, vagy ha a mező üres.
+    A BPM-et nem Beatport-forrás csak üres mezőbe írja, és a fele/duplája
+    tempót (70 vs 140) senki nem írja felül.
     A már bent lévő, eltérő ISRC-t nem cseréljük ki.
     """
     from music_id_tagger.reconcile import bpm_half_time
@@ -207,7 +221,7 @@ def apply_meta(existing: dict, incoming: dict, keep_identity: bool) -> dict:
             continue
         if key == "year" and keep_identity and not _blank(existing.get(key)):
             continue
-        if key == "genre" and not _blank(existing.get(key)) and not beatport_source:
+        if key == "genre" and not beatport_source:
             continue
         if key in {"key", "key_name", "label"} and not _blank(existing.get(key)) and not beatport_source:
             continue
@@ -578,11 +592,17 @@ async def _one(path: Path, options: Options, beatport, spotify, shazam, log: Log
             from music_id_tagger.identify import recognize_shazam
 
             recognized = await asyncio.wait_for(recognize_shazam(shazam, path), timeout=45)
-            if recognized:
-                found = apply_meta(found, recognized, keep_identity=False)
+            if recognized and _keep_fingerprint(recognized, existing, path.name):
+                found = apply_meta(found, _without_consumer_genre(recognized), keep_identity=False)
                 flog(
                     "ok",
                     f"Shazam: {path.name} → {clean(recognized.get('artist'))} - {clean(recognized.get('title'))}",
+                )
+            elif recognized:
+                flog(
+                    "muted",
+                    "Shazam nem egyezik a fájlnévvel vagy a taggel, kihagyom: "
+                    f"{clean(recognized.get('artist'))} - {clean(recognized.get('title'))}",
                 )
             else:
                 flog("muted", f"Shazam: nincs találat — {path.name}")
@@ -597,23 +617,35 @@ async def _one(path: Path, options: Options, beatport, spotify, shazam, log: Log
             from music_id_tagger.identify import identify_acoustid
 
             acoust = await asyncio.to_thread(identify_acoustid, path, options.acoustid_key.strip())
-            if acoust:
-                found = apply_meta(found, acoust, keep_identity=False)
+            if acoust and _keep_fingerprint(acoust, existing, path.name):
+                found = apply_meta(found, _without_consumer_genre(acoust), keep_identity=False)
                 flog("ok", f"AcoustID: {clean(acoust.get('artist'))} - {clean(acoust.get('title'))}")
+            elif acoust:
+                flog(
+                    "muted",
+                    "AcoustID nem egyezik a fájlnévvel vagy a taggel, kihagyom: "
+                    f"{clean(acoust.get('artist'))} - {clean(acoust.get('title'))}",
+                )
             else:
                 flog("muted", f"AcoustID: nincs találat — {path.name}")
         except Exception as exc:
             flog("err", f"AcoustID hiba ({path.name}): {exc}")
 
-    query_artist = clean(found.get("artist")) or clean(existing.get("artist"))
-    query_title = clean(found.get("title")) or clean(existing.get("title"))
-    guessed = False
-    if not query_artist or not query_title:
-        parsed = parse_filename(path.name)
-        if parsed:
-            query_artist = query_artist or parsed[0]
-            query_title = query_title or parsed[1]
-            guessed = True
+    local_artist, local_title, origin = search_identity(existing, path.name)
+    if origin == "conflict-file":
+        query_artist, query_title = local_artist, local_title
+        guessed = True
+        flog("muted", f"A fájlnév és a tag eltér. A fájlnév alapján keresek: {local_artist} - {local_title}")
+    elif clean(found.get("artist")) and clean(found.get("title")):
+        query_artist = clean(found.get("artist"))
+        query_title = clean(found.get("title"))
+        guessed = False
+    elif origin in {"tag", "file"}:
+        query_artist, query_title = local_artist, local_title
+        guessed = origin == "file"
+    else:
+        query_artist, query_title = "", ""
+        guessed = False
 
     forced = _forced_beatport_id(path, options)
     if beatport is not None and forced:
@@ -709,7 +741,10 @@ async def _one(path: Path, options: Options, beatport, spotify, shazam, log: Log
         _emit(track, _file_key(path), path.name, "missed", "Nincs találat", url, label)
         return
 
-    final = apply_meta(existing, found, keep_identity=options.keep_identity)
+    final_keep = options.keep_identity and origin != "conflict-file"
+    if origin == "conflict-file" and options.keep_identity:
+        flog("muted", "A bent lévő cím nem a fájlnévhez tartozik, a találat cseréli.")
+    final = apply_meta(existing, found, keep_identity=final_keep)
     unsure = is_uncertain(found, guessed)
     if unsure:
         flog("muted", f"Bizonytalan találat, nézd meg a forrást: {path.name}")

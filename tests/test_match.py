@@ -116,6 +116,17 @@ def test_rejects_same_artist_different_title():
     assert best_track([weekend], "Pablo Say, David LeSal, Viv Castle", "It's the E")[0] is None
 
 
+def test_shazam_must_match_filename_and_tags():
+    from music_id_tagger.match import fingerprint_allowed, search_identity
+
+    assert fingerprint_allowed("bbno$", "check", {"artist": "Matt Guy", "title": "Chorale"}, "Matt Guy - Chorale.mp3") is False
+    assert fingerprint_allowed("Matt Guy", "Chorale", {"artist": "Matt Guy", "title": "Chorale"}, "Matt Guy - Chorale.mp3") is True
+    assert fingerprint_allowed("bbno$", "check", {}, "Matt Guy - Chorale.mp3") is False
+    assert fingerprint_allowed("bbno$", "check", {}, "track01.mp3") is True
+    artist, title, origin = search_identity({"artist": "bbno$", "title": "check"}, "Matt Guy - Chorale.mp3")
+    assert (artist, title, origin) == ("Matt Guy", "Chorale", "conflict-file")
+
+
 if __name__ == "__main__":
     test_genre_label()
     test_camelot()
