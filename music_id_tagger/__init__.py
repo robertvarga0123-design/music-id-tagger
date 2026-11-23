@@ -1,3 +1,3 @@
-"""Music ID Tagger: Shazam, Beatport, Spotify, Deezer, Apple, MusicBrainz."""
+"""Music ID Tagger: Shazam, Beatport, Spotify, Deezer, Apple, MusicBrainz, Discogs."""
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"

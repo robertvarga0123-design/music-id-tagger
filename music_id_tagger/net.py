@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 
-USER_AGENT = "MusicIDTagger/1.1 (https://github.com/robertvarga0123-design/music-id-tagger)"
+USER_AGENT = "MusicIDTagger/1.2 (https://github.com/robertvarga0123-design/music-id-tagger)"
 _RETRY = {429, 500, 502, 503, 504}
 
 

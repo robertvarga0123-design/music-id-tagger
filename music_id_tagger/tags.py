@@ -146,6 +146,90 @@ def _from_id3(tags: Any) -> dict[str, Any]:
     }
 
 
+def read_duration(path: Path) -> float | None:
+    """Decoded length in seconds. None when the file does not say."""
+    try:
+        from mutagen import File
+
+        audio = File(path)
+        length = getattr(getattr(audio, "info", None), "length", None)
+        if length and float(length) > 1:
+            return float(length)
+    except Exception:
+        return None
+    return None
+
+
+def read_cover_bytes(path: Path) -> bytes | None:
+    """Embedded front cover, if the file already has one."""
+    ext = path.suffix.lower()
+    try:
+        if ext == ".mp3":
+            from mutagen.id3 import ID3, ID3NoHeaderError
+
+            try:
+                return _apic_bytes(ID3(path))
+            except ID3NoHeaderError:
+                return None
+        if ext == ".flac":
+            from mutagen.flac import FLAC
+
+            return _picture_bytes(FLAC(path))
+        if ext in {".m4a", ".mp4"}:
+            from mutagen.mp4 import MP4
+
+            covers = MP4(path).get("covr") or []
+            if covers:
+                return bytes(covers[0])
+        if ext == ".ogg":
+            from mutagen.oggvorbis import OggVorbis
+
+            return _picture_bytes(OggVorbis(path))
+        if ext == ".opus":
+            from mutagen.oggopus import OggOpus
+
+            return _picture_bytes(OggOpus(path))
+        if ext == ".wav":
+            from mutagen.wave import WAVE
+
+            return _apic_bytes(WAVE(path).tags)
+        if ext in {".aiff", ".aif"}:
+            from mutagen.aiff import AIFF
+
+            return _apic_bytes(AIFF(path).tags)
+    except Exception:
+        return None
+    return None
+
+
+def _apic_bytes(tags: Any) -> bytes | None:
+    if not tags:
+        return None
+    fallback = None
+    for key in tags.keys():
+        if not str(key).startswith("APIC"):
+            continue
+        frame = tags.get(key)
+        data = getattr(frame, "data", None)
+        if not data:
+            continue
+        blob = bytes(data)
+        if getattr(frame, "type", None) == 3:
+            return blob
+        if fallback is None:
+            fallback = blob
+    return fallback
+
+
+def _picture_bytes(audio: Any) -> bytes | None:
+    pictures = getattr(audio, "pictures", None) or []
+    for picture in pictures:
+        data = getattr(picture, "data", None)
+        if data:
+            return bytes(data)
+    return None
+
+
 def _comment(meta: dict[str, Any]) -> str:
     parts = []
     if meta.get("beatport_id"):

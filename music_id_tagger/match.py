@@ -7,6 +7,12 @@ _TOKEN = re.compile(r"[a-z0-9]+", re.I)
 _FILENAME = re.compile(
     r"^(?:\d{1,3}[\s._-]*)?(?P<artist>.+?)\s+-\s+(?P<title>.+?)(?:\s*\[[^\]]*\])?$"
 )
+_CAMELOT = re.compile(r"^(?P<num>\d{1,2})\s*(?P<letter>[ab])$", re.I)
+_OPEN_KEY = re.compile(r"^(?P<num>\d{1,2})\s*(?P<letter>[md])$", re.I)
+_MUSICAL = re.compile(
+    r"^(?P<note>c#|db|d#|eb|f#|gb|g#|ab|a#|bb|[a-g])\s*(?P<mode>minor|min|major|maj|m)?$",
+    re.I,
+)
 _STOP = {
     "the",
     "a",
@@ -27,6 +33,72 @@ _STOP = {
     "aka",
 }
 
+# Camelot wheel. Open Key 1m/1d sits on 8A/8B (A minor / C major).
+CAMELOT_TO_NAME = {
+    "1A": "G#m",
+    "2A": "D#m",
+    "3A": "A#m",
+    "4A": "Fm",
+    "5A": "Cm",
+    "6A": "Gm",
+    "7A": "Dm",
+    "8A": "Am",
+    "9A": "Em",
+    "10A": "Bm",
+    "11A": "F#m",
+    "12A": "C#m",
+    "1B": "B",
+    "2B": "F#",
+    "3B": "C#",
+    "4B": "G#",
+    "5B": "D#",
+    "6B": "A#",
+    "7B": "F",
+    "8B": "C",
+    "9B": "G",
+    "10B": "D",
+    "11B": "A",
+    "12B": "E",
+}
+_MINOR = {
+    "g#": "1A",
+    "ab": "1A",
+    "d#": "2A",
+    "eb": "2A",
+    "a#": "3A",
+    "bb": "3A",
+    "f": "4A",
+    "c": "5A",
+    "g": "6A",
+    "d": "7A",
+    "a": "8A",
+    "e": "9A",
+    "b": "10A",
+    "f#": "11A",
+    "gb": "11A",
+    "c#": "12A",
+    "db": "12A",
+}
+_MAJOR = {
+    "b": "1B",
+    "f#": "2B",
+    "gb": "2B",
+    "c#": "3B",
+    "db": "3B",
+    "g#": "4B",
+    "ab": "4B",
+    "d#": "5B",
+    "eb": "5B",
+    "a#": "6B",
+    "bb": "6B",
+    "f": "7B",
+    "c": "8B",
+    "g": "9B",
+    "d": "10B",
+    "a": "11B",
+    "e": "12B",
+}
+
 
 def clean(value: Any) -> str:
     if value is None:
@@ -45,16 +117,63 @@ def beatport_genre(genre: str | None, sub_genre: str | None) -> str | None:
     return main or sub or None
 
 
+def to_camelot(value: Any) -> str | None:
+    """Camelot, Open Key (1m/1d) or a musical name (Amin, F# minor) → 8A.
+
+    Unrecognised text is None. A Beatport dict without a Camelot code is left
+    to ``camelot_or_name``, which still returns the original name.
+    """
+    text = clean(value).replace(" ", "")
+    if not text:
+        return None
+    camelot = _CAMELOT.match(text)
+    if camelot:
+        number = int(camelot.group("num"))
+        if 1 <= number <= 12:
+            return f"{number}{camelot.group('letter').upper()}"
+        return None
+    opened = _OPEN_KEY.match(text)
+    if opened:
+        number = int(opened.group("num"))
+        if 1 <= number <= 12:
+            camelot_num = ((8 - 1 + (number - 1)) % 12) + 1
+            side = "A" if opened.group("letter").lower() == "m" else "B"
+            return f"{camelot_num}{side}"
+        return None
+    musical = _MUSICAL.match(text)
+    if not musical:
+        spaced = clean(value)
+        musical = _MUSICAL.match(re.sub(r"\s+", "", spaced))
+    if not musical:
+        return None
+    note = musical.group("note").lower()
+    mode = (musical.group("mode") or "").lower()
+    minor = mode in {"m", "min", "minor"}
+    table = _MINOR if minor else _MAJOR
+    return table.get(note)
+
+
+def camelot_name(code: Any) -> str | None:
+    text = clean(code).upper().replace(" ", "")
+    return CAMELOT_TO_NAME.get(text) or None
+
+
 def camelot_or_name(key: Any) -> str | None:
     if isinstance(key, dict):
         number = key.get("camelot_number")
         letter = clean(key.get("camelot_letter"))
         if number not in (None, "") and letter:
             return f"{number}{letter}"
+        raw = key.get("camelot")
+        converted = to_camelot(raw) if raw not in (None, "") else None
+        if converted:
+            return converted
         name = clean(key.get("name"))
         return name or None
     text = clean(key)
-    return text or None
+    if not text:
+        return None
+    return to_camelot(text) or text
 
 
 def musical_key_name(key: Any) -> str | None:

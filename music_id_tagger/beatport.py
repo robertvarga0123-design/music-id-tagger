@@ -78,6 +78,18 @@ def _cover_url(track: dict) -> str | None:
     return None
 
 
+def _duration(track: dict):
+    from music_id_tagger.reconcile import duration_seconds
+
+    raw_ms = track.get("length_ms")
+    if raw_ms not in (None, "", 0):
+        try:
+            return duration_seconds(float(raw_ms) / 1000.0)
+        except (TypeError, ValueError):
+            return None
+    return duration_seconds(track.get("length"))
+
+
 def normalize_track(track: dict) -> dict[str, Any]:
     artists = ", ".join(
         clean(item.get("name"))
@@ -112,6 +124,7 @@ def normalize_track(track: dict) -> dict[str, Any]:
         ),
         "genre": genre,
         "bpm": bpm_value,
+        "duration": _duration(track),
         "key": camelot_or_name(key),
         "key_name": musical_key_name(key),
         "label": _name(label),
@@ -226,7 +239,7 @@ class BeatportClient:
             self.refresh_token = body["refresh_token"]
         return bool(body.get("access_token"))
 
-    def search(self, artist: str, title: str, log: Callable[[str, str], None] | None = None) -> dict[str, Any] | None:
+    def search(self, artist: str, title: str, log: Callable[[str, str], None] | None = None, file_duration=None) -> dict[str, Any] | None:
         if not self.access_token or not clean(artist) or not clean(title):
             return None
         query = f"{clean(artist)} {clean(title)}"
@@ -244,6 +257,13 @@ class BeatportClient:
         tracks = data.get("tracks") or data.get("results") or []
         if isinstance(tracks, dict):
             tracks = tracks.get("data") or tracks.get("results") or []
+        from music_id_tagger.reconcile import prefer_duration
+
+        tracks, dropped = prefer_duration(tracks, file_duration)
+        if not tracks and dropped:
+            if log:
+                log("muted", f"Beatport: a találatok hossza nem egyezik a fájllal — {query}")
+            return None
         winner, score = best_track(tracks, artist, title)
         if not winner:
             if log:

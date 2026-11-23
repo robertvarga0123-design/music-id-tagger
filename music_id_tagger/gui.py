@@ -31,6 +31,7 @@ _STATE = {
     "deezer": "Deezer…",
     "apple": "Apple…",
     "musicbrainz": "MusicBrainz…",
+    "discogs": "Discogs…",
     "write": "Írás…",
     "ok": "Kész",
     "unsure": "! Bizonytalan",
@@ -141,6 +142,7 @@ class App(tk.Tk):
             ("deezer", BRASS),
             ("apple", BRASS),
             ("musicbrainz", BRASS),
+            ("discogs", BRASS),
             ("write", BRASS),
             ("wait", MUTED),
             ("unsure", WARN),
@@ -180,7 +182,7 @@ class App(tk.Tk):
         self.write_bpm_to_xml = tk.BooleanVar(value=True)
         self._check(right, "Shazam hangminta", self.use_shazam)
         self._check(right, "Beatport (BPM, hangnem, stílus)", self.use_beatport)
-        self._check(right, "Deezer, Apple, MusicBrainz (kulcs nélkül)", self.use_open_catalogs)
+        self._check(right, "Deezer, Apple, MusicBrainz, Discogs", self.use_open_catalogs)
         tk.Label(right, text="Beatport felhasználó", bg=PAPER, fg=MUTED).pack(anchor="w", padx=12, pady=(8, 0))
         self.user = self._entry(right)
         tk.Label(right, text="Jelszó  ·  erre a gépre emlékezik", bg=PAPER, fg=MUTED).pack(anchor="w", padx=12, pady=(8, 0))
@@ -446,7 +448,7 @@ class App(tk.Tk):
             messagebox.showinfo("Music ID Tagger", "Előbb adj meg legalább egy mappát vagy fájlt.")
             return
         if not self.use_shazam.get() and not self.use_beatport.get() and not self.use_spotify.get() and not self.use_open_catalogs.get() and not self.acoustid.get().strip():
-            messagebox.showinfo("Music ID Tagger", "Kapcsolj be legalább egy forrást: Shazam, Beatport, Deezer/Apple/MusicBrainz, Spotify vagy AcoustID.")
+            messagebox.showinfo("Music ID Tagger", "Kapcsolj be legalább egy forrást: Shazam, Beatport, katalógus, Spotify vagy AcoustID.")
             return
         self._persist()
         try:

@@ -3,3 +3,4 @@ mutagen>=1.47.0
 requests>=2.32.0
 pyacoustid>=1.3.0
 musicbrainzngs>=0.7.1
+Pillow>=10.0.0

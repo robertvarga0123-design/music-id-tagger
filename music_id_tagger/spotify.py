@@ -45,6 +45,17 @@ def _spotify_url(track: dict) -> str | None:
     return None
 
 
+def _duration_ms(value):
+    from music_id_tagger.reconcile import duration_seconds
+
+    if value in (None, "", 0):
+        return None
+    try:
+        return duration_seconds(float(value) / 1000.0)
+    except (TypeError, ValueError):
+        return None
+
+
 def normalize_track(track: dict, features: dict | None = None) -> dict[str, Any]:
     artists = ", ".join(
         clean(item.get("name"))
@@ -61,6 +72,7 @@ def normalize_track(track: dict, features: dict | None = None) -> dict[str, Any]
         "album": clean(album.get("name")) or None,
         "year": year_from(album.get("release_date")),
         "isrc": clean(external.get("isrc")) or None,
+        "duration": _duration_ms(track.get("duration_ms")),
         "cover_url": images[0]["url"] if images else None,
         "spotify_id": clean(track.get("id")) or None,
         "source_url": _spotify_url(track),
@@ -130,7 +142,7 @@ class SpotifyClient:
             self._token()
         return {"Authorization": f"Bearer {self.access_token}"}
 
-    def search(self, artist: str, title: str, log: Callable[[str, str], None] | None = None) -> dict[str, Any] | None:
+    def search(self, artist: str, title: str, log: Callable[[str, str], None] | None = None, file_duration=None) -> dict[str, Any] | None:
         if not clean(artist) or not clean(title):
             return None
         query = f'artist:"{clean(artist).replace(chr(34), "")}" track:"{clean(title).replace(chr(34), "")}"'
@@ -146,6 +158,13 @@ class SpotifyClient:
                 log("err", f"Spotify keresés hiba ({code}).")
             return None
         items = ((response.json().get("tracks") or {}).get("items")) or []
+        from music_id_tagger.reconcile import prefer_duration
+
+        items, dropped = prefer_duration(items, file_duration)
+        if not items and dropped:
+            if log:
+                log("muted", f"Spotify: a találatok hossza nem egyezik a fájllal — {clean(artist)} - {clean(title)}")
+            return None
         winner, score = best_track(items, artist, title)
         if not winner:
             if log:

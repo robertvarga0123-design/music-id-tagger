@@ -28,6 +28,12 @@ A Spotify Web API client credentials belépést használ: `POST https://accounts
 
 A „meglévő címet és előadót hagyja” pipa alapból be van kapcsolva. A Beatport BPM, hangnem és stílus találat esetén akkor is beíródik, ha a mező nem üres.
 
+## Pontosabb találat
+
+A program a fájl hosszát hasonlítja a katalógus hosszához. Ha a kettő 6 másodpercnél és a hosszabbik 4%-ánál is jobban eltér, a találatot eldobja: így az Original Mix nem kapja meg az Extended vagy a Radio adatát. Ha a fájlban már van borító, és a találat borítója szemmel láthatóan más, azt a találatot is kihagyja. Ha nincs hossz vagy nincs borító, ettől még nem veti el.
+
+Az Open Key (`1m`, `1d`) és a zenei nevek (`Amin`, `F# minor`) Camelot kódra váltanak, például `8A`. A Traxsource nyilvános keresője Cloudflare mögött van, a hivatalos API pedig csak meghívóra elérhető, ezért nincs bekötve. Automatikus hot cue és helyi BPM-elemzés sincs: ahhoz natív hangmotor kellene, az pedig széttörné a Windows telepítőt. A kézzel beírt Beatport linket akkor is használja, ha a hossz kicsit eltér.
+
 ## Amit ebből raktam össze
 
 | Feladat | Forrás |
@@ -38,7 +44,7 @@ A „meglévő címet és előadót hagyja” pipa alapból be van kapcsolva. A 
 | Régebbi webes forrás | stevehero Mp3tag Beatport scriptjei. A kiadói oldalak tracklistája 2026-ban már nem megbízható, ezért nem arra épül |
 | Tag írás | mutagen, Rekordbox-barát TKEY / TBPM / TPUB |
 | Telepítő | PyInstaller onedir + Inno Setup 6. A natív Shazam könyvtár onefile exe-ben eltörik |
-| Ha minden bolt kell | [OneTagger](https://onetagger.github.io/) már tud Discogsot, Spotifyt, Traxsource-t, Junót és Beatsource-t is. Ez a program a Shazam-mintára és a saját Beatport belépésre van kihegyezve |
+| Ha minden bolt kell | [OneTagger](https://onetagger.github.io/) már tud Traxsource-t, Junót és Beatsource-t is. Ebből a hossz- és borítóellenőrzés, a Camelot-átváltás és a kulcs nélküli Discogs keresés került át |
 
 ## Saját fordítás
 

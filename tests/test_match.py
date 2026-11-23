@@ -10,6 +10,7 @@ from music_id_tagger.match import (
     camelot_or_name,
     parse_filename,
     score_track,
+    to_camelot,
 )
 
 
@@ -25,6 +26,16 @@ def test_genre_label():
 def test_camelot():
     assert camelot_or_name({"camelot_number": 8, "camelot_letter": "A", "name": "A Minor"}) == "8A"
     assert camelot_or_name({"name": "F# Minor"}) == "F# Minor"
+    assert camelot_or_name({"camelot": "8A", "name": "A min"}) == "8A"
+    assert to_camelot("8A") == "8A"
+    assert to_camelot("1m") == "8A"
+    assert to_camelot("1d") == "8B"
+    assert to_camelot("12d") == "7B"
+    assert to_camelot("Amin") == "8A"
+    assert to_camelot("G#min") == "1A"
+    assert to_camelot("F# Minor") == "11A"
+    assert to_camelot("not a key") is None
+    assert camelot_or_name("1m") == "8A"
 
 
 def test_score_prefers_real_match():
@@ -61,6 +72,7 @@ def test_normalize_uses_track_fields():
             "isrc": "CA5KR1821203",
             "catalog_number": "CR001B",
             "publish_date": "2018-07-13",
+            "length_ms": 248000,
             "genre": {"name": "Tech House"},
             "sub_genre": None,
             "key": {"camelot_number": 9, "camelot_letter": "B", "name": "G Major"},
@@ -71,6 +83,7 @@ def test_normalize_uses_track_fields():
     assert meta["catalog"] == "CR001B"
     assert meta["isrc"] == "CA5KR1821203"
     assert meta["key"] == "9B"
+    assert meta["duration"] == 248
     assert meta["genre"] == "Tech House"
     assert meta["label"] == "Catch & Release"
 
