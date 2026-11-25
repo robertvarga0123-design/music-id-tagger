@@ -34,6 +34,8 @@ A program a fájl hosszát hasonlítja a katalógus hosszához. Ha a kettő 6 m�
 
 A Shazam-találatot a fájlnévvel és a bent lévő taggel is összeveti. A `Matt Guy - Chorale.mp3` nem lehet `bbno$ - check`. Ha a kettő eltér, a hangmintát kihagyja, és a fájlnév alapján keres. Műfajt csak a Beatport ír: a Shazam „Dance / Pop” és az „Electronic” nem kerül a fájlba.
 
+Ha a találat bizonytalan, és megvan mind a két kulcs, a Grok és a Gemini ugyanazt a jelöltet látja. Csak akkor lesz zöld, ha mindkettő ugyanazt a felvételt fogadja el. Egy elutasításnál a fájl nem változik (`! AI nem`). Egy kulcsnál a sor sárga marad. A kulcsok a gépen maradnak, titkosítva. Grok: [console.x.ai](https://console.x.ai), Gemini: [aistudio.google.com](https://aistudio.google.com).
+
 Az Open Key (`1m`, `1d`) és a zenei nevek (`Amin`, `F# minor`) Camelot kódra váltanak, például `8A`. A Traxsource nyilvános keresője Cloudflare mögött van, a hivatalos API pedig csak meghívóra elérhető, ezért nincs bekötve. Automatikus hot cue és helyi BPM-elemzés sincs: ahhoz natív hangmotor kellene, az pedig széttörné a Windows telepítőt. A kézzel beírt Beatport linket akkor is használja, ha a hossz kicsit eltér.
 
 ## Amit ebből raktam össze

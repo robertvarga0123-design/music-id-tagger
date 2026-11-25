@@ -37,6 +37,14 @@ def load_spotify_secret(data: dict | None = None) -> str:
     return _load_secret(data, "spotify_client_secret_dpapi")
 
 
+def load_grok_key(data: dict | None = None) -> str:
+    return _load_secret(data, "grok_key_dpapi")
+
+
+def load_gemini_key(data: dict | None = None) -> str:
+    return _load_secret(data, "gemini_key_dpapi")
+
+
 def _load_secret(data: dict | None, key: str) -> str:
     source = data if data is not None else load_settings()
     token = source.get(key)
@@ -55,6 +63,8 @@ def save_settings(data: dict) -> None:
     clean.pop("password", None)
     _store_secret(clean, previous, "spotify_client_secret", "spotify_client_secret_dpapi")
     clean.pop("client_secret", None)
+    _store_secret(clean, previous, "grok_key", "grok_key_dpapi")
+    _store_secret(clean, previous, "gemini_key", "gemini_key_dpapi")
     folder = settings_dir()
     folder.mkdir(parents=True, exist_ok=True)
     settings_path().write_text(

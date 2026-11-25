@@ -25,6 +25,8 @@ class Options:
     spotify_client_id: str = ""
     spotify_client_secret: str = ""
     acoustid_key: str = ""
+    grok_key: str = ""
+    gemini_key: str = ""
     dry_run: bool = True
     keep_identity: bool = True
     embed_cover: bool = True
@@ -499,6 +501,14 @@ def _run(
             log("err", f"Spotify belépés nem sikerült: {exc}")
     elif options.use_spotify:
         log("muted", "Spotify be van kapcsolva, de nincs Client ID vagy Client Secret.")
+    if options.grok_key or options.gemini_key:
+        both = bool(options.grok_key and options.gemini_key)
+        log(
+            "info",
+            "Két AI dönt a bizonytalan találatoknál: csak akkor írunk, ha mindkettő elfogadja."
+            if both
+            else "Egy AI kulcs van meg. A döntése sárga marad, amíg a Grok és a Gemini kulcs is bent van.",
+        )
     if options.use_open_catalogs:
         log("info", "Deezer, Apple, MusicBrainz és Discogs bekapcsolva. Ezekhez nem kell kulcs.")
 
@@ -765,8 +775,32 @@ async def _one(path: Path, options: Options, beatport, spotify, shazam, log: Log
     final_keep = options.keep_identity and origin != "conflict-file"
     if origin == "conflict-file" and options.keep_identity:
         flog("muted", "A bent lévő cím nem a fájlnévhez tartozik, a találat cseréli.")
-    final = apply_meta(existing, found, keep_identity=final_keep)
     unsure = is_uncertain(found, guessed)
+    if (options.grok_key or options.gemini_key) and not forced and unsure:
+        stage("ai")
+        from music_id_tagger.judge import review
+
+        verdict = await asyncio.to_thread(
+            review,
+            path.name,
+            existing,
+            found,
+            file_duration,
+            options.grok_key,
+            options.gemini_key,
+            flog,
+        )
+        if verdict.used and not verdict.accept:
+            stats.missed += 1
+            flog("muted", f"AI nem engedi a találatot, a fájl marad: {path.name}")
+            _push_file(stats, path.name, "missed", existing, found, lines, unsure=True, source_url=url, source_label=label)
+            _emit(track, _file_key(path), path.name, "rejected", "AI elutasította", url, label)
+            return
+        if verdict.confirmed >= 2:
+            unsure = False
+        elif verdict.confirmed == 1:
+            unsure = True
+    final = apply_meta(existing, found, keep_identity=final_keep)
     if unsure:
         flog("muted", f"Bizonytalan találat, nézd meg a forrást: {path.name}")
     prefix = "PRÓBA" if options.dry_run else "ÍRVA"

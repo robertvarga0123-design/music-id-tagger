@@ -17,6 +17,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--acoustid-key", default="", help="Opcionális AcoustID kulcs")
     parser.add_argument("--spotify-id", default="", help="Spotify Client ID")
     parser.add_argument("--spotify-secret", default="", help="Spotify Client Secret, csak erre a futásra")
+    parser.add_argument("--grok-key", default="", help="xAI Grok API kulcs, csak erre a futásra")
+    parser.add_argument("--gemini-key", default="", help="Google Gemini API kulcs, csak erre a futásra")
     parser.add_argument("--no-spotify", action="store_true")
     parser.add_argument("--no-shazam", action="store_true")
     parser.add_argument("--no-beatport", action="store_true")
@@ -54,6 +56,8 @@ def main(argv: list[str] | None = None) -> int:
         spotify_client_id=args.spotify_id,
         spotify_client_secret=args.spotify_secret,
         acoustid_key=args.acoustid_key,
+        grok_key=args.grok_key,
+        gemini_key=args.gemini_key,
         dry_run=not args.write,
         keep_identity=not args.overwrite_identity,
         embed_cover=not args.no_cover,

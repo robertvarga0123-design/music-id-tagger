@@ -8,7 +8,7 @@ from pathlib import Path
 from tkinter import filedialog, font as tkfont, messagebox, ttk
 
 from music_id_tagger import __version__
-from music_id_tagger.config import load_password, load_settings, load_spotify_secret, save_settings
+from music_id_tagger.config import load_gemini_key, load_grok_key, load_password, load_settings, load_spotify_secret, save_settings
 from music_id_tagger.engine import Options, run
 
 BG = "#10110f"
@@ -34,10 +34,12 @@ _STATE = {
     "musicbrainz": "MusicBrainz…",
     "discogs": "Discogs…",
     "web": "Keresés…",
+    "ai": "AI…",
     "write": "Írás…",
     "ok": "Kész",
     "unsure": "! Bizonytalan",
     "missed": "! Nincs találat",
+    "rejected": "! AI nem",
     "failed": "Hiba",
 }
 
@@ -46,8 +48,8 @@ class App(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title(f"Music ID Tagger {__version__}")
-        self.geometry("980x780")
-        self.minsize(860, 680)
+        self.geometry("980x860")
+        self.minsize(860, 760)
         self.configure(bg=BG)
         self.queue: queue.Queue = queue.Queue()
         self.cancel = threading.Event()
@@ -90,15 +92,36 @@ class App(tk.Tk):
 
         left = tk.Frame(body, bg=PAPER, highlightbackground=LINE, highlightthickness=1)
         left.grid(row=0, column=0, sticky="nsew", padx=(0, 8), pady=8)
-        right = tk.Frame(body, bg=PAPER, highlightbackground=LINE, highlightthickness=1)
-        right.grid(row=0, column=1, sticky="nsew", padx=(8, 0), pady=8)
+        right_host = tk.Frame(body, bg=PAPER, highlightbackground=LINE, highlightthickness=1)
+        right_host.grid(row=0, column=1, sticky="nsew", padx=(8, 0), pady=8)
+        right_canvas = tk.Canvas(right_host, bg=PAPER, highlightthickness=0, borderwidth=0)
+        right_scroll = ttk.Scrollbar(right_host, orient="vertical", command=right_canvas.yview)
+        right = tk.Frame(right_canvas, bg=PAPER)
+        right_window = right_canvas.create_window((0, 0), window=right, anchor="nw")
+
+        def _right_inner(_event=None) -> None:
+            right_canvas.configure(scrollregion=right_canvas.bbox("all"))
+
+        def _right_width(event) -> None:
+            right_canvas.itemconfigure(right_window, width=event.width)
+
+        def _right_wheel(event) -> None:
+            right_canvas.yview_scroll(int(-event.delta / 120), "units")
+
+        right.bind("<Configure>", _right_inner)
+        right_canvas.bind("<Configure>", _right_width)
+        right_canvas.bind("<Enter>", lambda _e: right_canvas.bind_all("<MouseWheel>", _right_wheel))
+        right_canvas.bind("<Leave>", lambda _e: right_canvas.unbind_all("<MouseWheel>"))
+        right_canvas.pack(side="left", fill="both", expand=True)
+        right_scroll.pack(side="right", fill="y")
+        right_canvas.configure(yscrollcommand=right_scroll.set)
 
         tk.Label(left, text="Mappák és fájlok", bg=PAPER, fg=INK, font=self._face(12, True)).pack(
             anchor="w", padx=12, pady=(12, 6)
         )
         tk.Label(
             left,
-            text="A szám mellett látszik, hol tart. A sárga ! bizonytalan.",
+            text="A szám mellett látszik, hol tart. A sárga ! bizonytalan, a ! AI nem elutasított.",
             bg=PAPER,
             fg=MUTED,
         ).pack(anchor="w", padx=12, pady=(0, 6))
@@ -147,10 +170,12 @@ class App(tk.Tk):
             ("musicbrainz", BRASS),
             ("discogs", BRASS),
             ("web", BRASS),
+            ("ai", BRASS),
             ("write", BRASS),
             ("wait", MUTED),
             ("unsure", WARN),
             ("missed", WARN),
+            ("rejected", WARN),
             ("bad", CLAY),
         ):
             self.tree.tag_configure(name, foreground=color)
@@ -200,6 +225,13 @@ class App(tk.Tk):
         self.spotify_secret = self._entry(right, secret=True)
         tk.Label(right, text="AcoustID kulcs  ·  nem kötelező", bg=PAPER, fg=MUTED).pack(anchor="w", padx=12, pady=(8, 0))
         self.acoustid = self._entry(right)
+        tk.Label(right, text="Két AI a bizonytalan találatot csak együtt fogadja el.", bg=PAPER, fg=MUTED).pack(
+            anchor="w", padx=12, pady=(8, 0)
+        )
+        tk.Label(right, text="Grok kulcs  ·  erre a gépre emlékezik", bg=PAPER, fg=MUTED).pack(anchor="w", padx=12, pady=(4, 0))
+        self.grok_key = self._entry(right, secret=True)
+        tk.Label(right, text="Gemini kulcs  ·  erre a gépre emlékezik", bg=PAPER, fg=MUTED).pack(anchor="w", padx=12, pady=(8, 0))
+        self.gemini_key = self._entry(right, secret=True)
         self._check(right, "Próba: ne írjon a fájlokba", self.dry_run)
         self._check(right, "Meglévő címet és előadót hagyja", self.keep_identity)
         self._check(right, "Borító mentése, ha még nincs", self.embed_cover)
@@ -413,6 +445,12 @@ class App(tk.Tk):
         remembered_spotify = load_spotify_secret(data)
         if remembered_spotify:
             self.spotify_secret.insert(0, remembered_spotify)
+        remembered_grok = load_grok_key(data)
+        if remembered_grok:
+            self.grok_key.insert(0, remembered_grok)
+        remembered_gemini = load_gemini_key(data)
+        if remembered_gemini:
+            self.gemini_key.insert(0, remembered_gemini)
         self.use_shazam.set(bool(data.get("use_shazam", True)))
         self.use_beatport.set(bool(data.get("use_beatport", True)))
         self.use_spotify.set(bool(data.get("use_spotify", True)))
@@ -438,6 +476,8 @@ class App(tk.Tk):
                 "spotify_client_id": self.spotify_id.get().strip(),
                 "spotify_client_secret": self.spotify_secret.get(),
                 "acoustid_key": self.acoustid.get().strip(),
+                "grok_key": self.grok_key.get(),
+                "gemini_key": self.gemini_key.get(),
                 "use_shazam": self.use_shazam.get(),
                 "use_beatport": self.use_beatport.get(),
                 "use_spotify": self.use_spotify.get(),
@@ -473,6 +513,8 @@ class App(tk.Tk):
             spotify_client_id=self.spotify_id.get().strip(),
             spotify_client_secret=self.spotify_secret.get(),
             acoustid_key=self.acoustid.get().strip(),
+            grok_key=self.grok_key.get().strip(),
+            gemini_key=self.gemini_key.get().strip(),
             dry_run=self.dry_run.get(),
             keep_identity=self.keep_identity.get(),
             embed_cover=self.embed_cover.get(),
@@ -562,7 +604,6 @@ class App(tk.Tk):
                     stats = item[1]
                     self.start_btn.configure(state="normal")
                     self.stop_btn.configure(state="disabled")
-                    self.spotify_secret.delete(0, "end")
                     if not stats.cancelled:
                         messagebox.showinfo(
                             "Music ID Tagger",
@@ -587,7 +628,7 @@ class App(tk.Tk):
         tag = "unsure" if state in {"unsure", "missed"} else "bad" if state == "failed" else state if state in _STATE else "ok"
         label = _STATE.get(state, state)
         source = link
-        if not source and detail and state in {"ok", "unsure", "missed", "failed"}:
+        if not source and detail and state in {"ok", "unsure", "missed", "failed", "rejected"}:
             source = detail
         iid = self.rows.get(key)
         if not iid or not self.tree.exists(iid):

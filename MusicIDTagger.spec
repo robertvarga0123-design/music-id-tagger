@@ -47,6 +47,7 @@ hidden = [
     "music_id_tagger.undo",
     "music_id_tagger.websearch",
     "music_id_tagger.updatecheck",
+    "music_id_tagger.judge",
     "acoustid",
     "musicbrainzngs",
 ]
