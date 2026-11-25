@@ -49,7 +49,10 @@ def main() -> None:
     sys.excepthook = _crash
     from music_id_tagger.gui import run_gui
 
-    run_gui()
+    try:
+        run_gui()
+    except Exception:
+        _crash(*sys.exc_info())
 
 
 if __name__ == "__main__":

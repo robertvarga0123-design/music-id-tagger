@@ -1,5 +1,10 @@
 # Változások
 
+## 1.5.2
+
+- Az ablak indul. A saját `_options` felülírta a tkinter belső metódusát, ezért jött az angol „takes 1 positional argument but 2 were given” hiba, még mielőtt a program megjelent.
+- A háttérben futó letöltés és a borító előnézet a fő szálon rajzol, nem a tkintert hívja szálból.
+
 ## 1.5.1
 
 - A frissítés gomb többé nem a Windows „nem találja: \\” ablakát nyitja. A telepítő egy rövid várakozás után indul, parancssor nélkül.

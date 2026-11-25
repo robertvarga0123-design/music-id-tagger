@@ -577,7 +577,7 @@ class App(tk.Tk):
         except ValueError:
             return 1.0
 
-    def _options(self) -> Options:
+    def _search_options(self) -> Options:
         return Options(
             use_shazam=self.use_shazam.get(),
             use_beatport=self.use_beatport.get(),
@@ -739,7 +739,7 @@ class App(tk.Tk):
             return
         self._persist()
         self._paint_providers()
-        options = self._options()
+        options = self._search_options()
         self.cancel = threading.Event()
         self.pending = []
         self._started = time.monotonic()
@@ -777,7 +777,7 @@ class App(tk.Tk):
             messagebox.showinfo("Music ID Tagger", "Nincs alkalmazható sor.")
             return
         self._persist()
-        options = self._options()
+        options = self._search_options()
         self.start_btn.configure(state="disabled")
         self.worker = threading.Thread(target=self._apply_work, args=(rows, options), daemon=True)
         self.worker.start()
@@ -930,7 +930,6 @@ class App(tk.Tk):
                 current = self.results.item(iid, "values")
                 state = current[0] if current else ""
                 self.results.item(iid, values=(state, item.name, summary_line(item), item.source or "–", f"{item.confidence}%"))
-        self._show_detail()
 
     def _load_cover(self, url: str, path: str) -> None:
         try:
@@ -946,7 +945,7 @@ class App(tk.Tk):
                 return
             image = Image.open(io.BytesIO(response.content))
             image.thumbnail((180, 180))
-            photo = ImageTk.PhotoImage(image)
+            payload = image.copy()
         except Exception:
             return
 
@@ -954,12 +953,13 @@ class App(tk.Tk):
             current = self._current()
             if current is None or current.path != path:
                 return
+            photo = ImageTk.PhotoImage(payload)
             self._cover_image = photo
             if getattr(self, "cover_label", None) is not None:
                 self.cover_label.configure(image=photo, text="")
 
         try:
-            self.after(0, paint)
+            self._later(paint)
         except Exception:
             return
 
@@ -967,6 +967,7 @@ class App(tk.Tk):
         iid = self.results.identify_row(event.y)
         if not iid:
             return
+        self.results.selection_set(iid)
         item = self._current()
         if item and (item.unsure or item.candidates or item.status in {"unsure", "missed"}):
             self._pick()
@@ -1027,10 +1028,10 @@ class App(tk.Tk):
             meta = client.by_id(ident)
         except Exception as exc:
             message = str(exc)
-            self.after(0, lambda message=message: messagebox.showerror("Music ID Tagger", message, parent=dialog))
+            self._later(lambda message=message: messagebox.showerror("Music ID Tagger", message, parent=dialog))
             return
         if not meta:
-            self.after(0, lambda: messagebox.showinfo("Music ID Tagger", "A Beatport nem adta vissza ezt az ID-t.", parent=dialog))
+            self._later(lambda: messagebox.showinfo("Music ID Tagger", "A Beatport nem adta vissza ezt az ID-t.", parent=dialog))
             return
 
         def apply_meta() -> None:
@@ -1039,7 +1040,7 @@ class App(tk.Tk):
             self._fill_results()
             dialog.destroy()
 
-        self.after(0, apply_meta)
+        self._later(apply_meta)
 
     def _drain(self) -> None:
         try:
@@ -1056,6 +1057,11 @@ class App(tk.Tk):
                     self.eta_label.configure(text=eta_text(done, total, time.monotonic() - self._started))
                 elif kind == "track":
                     self._track_row(item[1])
+                elif kind == "ui":
+                    try:
+                        item[1]()
+                    except Exception as exc:
+                        self._write("err", str(exc))
                 elif kind == "done":
                     stats = item[1]
                     self.pending = list(stats.pending)
@@ -1146,7 +1152,7 @@ class App(tk.Tk):
             self._write("info", f"Frissítés letöltése: {info['version']}")
             threading.Thread(target=self._download_update, args=(info,), daemon=True).start()
 
-        self.after(0, finish)
+        self._later(finish)
 
     def _download_update(self, info: dict) -> None:
         from music_id_tagger.updatecheck import fetch_verified, launch_installer
@@ -1155,7 +1161,7 @@ class App(tk.Tk):
             dest = fetch_verified(str(info.get("url") or ""), str(info.get("sha256") or ""))
         except Exception as exc:
             message = str(exc)
-            self.after(0, lambda message=message: messagebox.showerror("Music ID Tagger", message))
+            self._later(lambda message=message: messagebox.showerror("Music ID Tagger", message))
             return
 
         def install() -> None:
@@ -1164,7 +1170,11 @@ class App(tk.Tk):
             self._persist()
             self.destroy()
 
-        self.after(0, install)
+        self._later(install)
+
+    def _later(self, callback) -> None:
+        """Run a UI callback on the main thread. Workers must not call Tk themselves."""
+        self.queue.put(("ui", callback))
 
     def _close(self) -> None:
         self._persist()
