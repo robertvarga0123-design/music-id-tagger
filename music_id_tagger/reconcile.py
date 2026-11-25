@@ -11,7 +11,7 @@ from __future__ import annotations
 import math
 
 from music_id_tagger.covers import cover_conflict
-from music_id_tagger.match import artists_compatible, camelot_name, clean, titles_compatible, to_camelot
+from music_id_tagger.match import artists_compatible, camelot_name, clean, genre_is_generic, titles_compatible, to_camelot
 
 _FILL = ("album", "year", "isrc", "cover_url", "label", "mbid", "spotify_id", "catalog", "mix", "duration")
 
@@ -217,6 +217,10 @@ def merge_hit(
                 found["bpm"] = hit["bpm"]
         if beatport and hit.get("genre"):
             found["genre"] = hit["genre"]
+            found["genre_from"] = "beatport"
+        elif hit.get("genre") and not clean(found.get("genre")) and not genre_is_generic(hit.get("genre")):
+            found["genre"] = hit["genre"]
+            found["genre_from"] = "other"
         if hit.get("beatport_id"):
             found["beatport_id"] = hit["beatport_id"]
     url = clean(hit.get("source_url"))

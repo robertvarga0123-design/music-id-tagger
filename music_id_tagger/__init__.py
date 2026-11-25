@@ -1,3 +1,7 @@
-"""Music ID Tagger: Shazam, Beatport, Spotify, Deezer, Apple, MusicBrainz, Discogs."""
+"""Music ID Tagger: Shazam, Beatport, Spotify, Deezer, Apple, MusicBrainz, Discogs.
 
-__version__ = "1.4.0"
+A webes keresés és a két AI külön kapcsolható. Hangminta csak a Shazamnak megy,
+jelszó csak a Beatportnak, fájlútvonal sehova.
+"""
+
+__version__ = "1.4.1"

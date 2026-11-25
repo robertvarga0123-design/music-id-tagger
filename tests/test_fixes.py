@@ -2,9 +2,9 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from music_id_tagger.engine import apply_meta
-from music_id_tagger.match import artists_compatible, titles_compatible
+from music_id_tagger.match import GENERIC_GENRES, artists_compatible, genre_is_generic, titles_compatible
 from music_id_tagger.rekordbox import apply_track
-from music_id_tagger.tags import COMMENT_MARKER, ID3_V2_VERSION, merge_comment, parse_bpm, snapshot_tags, write_tags
+from music_id_tagger.tags import COMMENT_MARKER, ID3_V2_VERSION, changed_fields, merge_comment, parse_bpm, read_tags, snapshot_tags, write_tags
 from music_id_tagger.undo import begin_run, commit_run, revert
 from tests.silence_bytes import SILENCE
 
@@ -217,3 +217,53 @@ def test_dry_run_writes_no_undo(tmp_path, monkeypatch):
     write_tags(path, {"title": "Nem íródik"}, dry_run=True, embed_cover=False)
     assert list_runs() == []
     assert snapshot_tags(path)["title"] == before
+
+
+def test_unchanged_decimal_bpm_is_not_rounded(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "app"))
+    path = _copy("silence.mp3", tmp_path)
+    from mutagen.id3 import ID3, TBPM
+
+    tagged = ID3(path)
+    tagged.delall("TBPM")
+    tagged.add(TBPM(encoding=3, text="127.98"))
+    tagged.save(v2_version=3)
+    assert read_tags(path)["bpm"] == "127.98"
+    assert "bpm" not in changed_fields(
+        {"bpm": "127.98", "title": "Régi"},
+        {"bpm": "127.98", "title": "Új", "source": "deezer"},
+    )
+    write_tags(
+        path,
+        {"title": "Új", "artist": "Valaki", "bpm": "127.98", "source": "deezer"},
+        dry_run=False,
+        embed_cover=False,
+    )
+    assert read_tags(path)["bpm"] == "127.98"
+    assert read_tags(path)["title"] == "Új"
+
+
+def test_generic_genre_constant_and_empty_field_rule():
+    assert GENERIC_GENRES == ("Dance", "Pop", "Electronic", "Electronica", "Music")
+    for word in GENERIC_GENRES:
+        assert genre_is_generic(word) is True
+    assert genre_is_generic("Dance / Pop") is True
+    assert genre_is_generic("electronic dance music") is True
+    assert genre_is_generic("Techno (Peak Time / Driving)") is False
+    assert genre_is_generic("Dancehall") is False
+    filled = apply_meta({}, {"genre": "Tech House", "source": "deezer"}, keep_identity=True)
+    assert filled["genre"] == "Tech House"
+    blocked = apply_meta({}, {"genre": "Dance / Pop", "source": "apple"}, keep_identity=True)
+    assert blocked.get("genre", "") == ""
+    kept = apply_meta(
+        {"genre": "House"},
+        {"genre": "Tech House", "source": "shazam+beatport", "genre_from": "other"},
+        keep_identity=True,
+    )
+    assert kept["genre"] == "House"
+    replaced = apply_meta(
+        {"genre": "House"},
+        {"genre": "Techno (Raw / Deep / Hypnotic)", "source": "beatport", "genre_from": "beatport"},
+        keep_identity=True,
+    )
+    assert replaced["genre"] == "Techno (Raw / Deep / Hypnotic)"

@@ -4,6 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
+    tags: ["v*"]
 
 permissions:
   contents: write
@@ -43,8 +44,11 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
+          $expected = "a549929319f9120716677c685535ca4671e4b937b5fdc87e2585f32d8eb30e8c"
           $dest = Join-Path $env:TEMP "innosetup.exe"
           Invoke-WebRequest -Uri "https://github.com/jrsoftware/issrc/releases/download/is-6_7_4/innosetup-6.7.4.exe" -OutFile $dest
+          $actual = (Get-FileHash -Algorithm SHA256 $dest).Hash.ToLower()
+          if ($actual -ne $expected) { throw "Inno Setup SHA256 nem egyezik: $actual" }
           Start-Process -FilePath $dest -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/SP-" -Wait
           $iscc = @(
             "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
@@ -62,6 +66,7 @@ jobs:
           if-no-files-found: error
 
       - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -71,10 +76,16 @@ jobs:
           if (-not $match) { throw "nincs verzió" }
           $version = $match.Matches[0].Groups[1].Value
           $tag = "v$version"
+          if ("${{ github.ref_name }}" -ne $tag) { throw "A címke (${{ github.ref_name }}) és a __version__ ($tag) nem egyezik." }
+          $sha = (Get-FileHash -Algorithm SHA256 "installer/Output/MusicIDTagger-Setup.exe").Hash.ToLower()
+          if ($sha -notmatch '^[0-9a-f]{64}$') { throw "nincs SHA256" }
+          $notes = "Windows telepítő. A program csak ezt a SHA256 sort fogadja el.`nSHA256: $sha`n"
           gh release view $tag
           if ($LASTEXITCODE -eq 0) {
             gh release upload $tag installer/Output/MusicIDTagger-Setup.exe --clobber
+            if ($LASTEXITCODE -ne 0) { throw "A telepítőt nem sikerült feltölteni" }
+            gh release edit $tag --notes $notes
           } else {
-            gh release create $tag installer/Output/MusicIDTagger-Setup.exe --title "Music ID Tagger $version" --notes "Windows telepítő. A program indításkor ezt a kiadást nézi."
+            gh release create $tag installer/Output/MusicIDTagger-Setup.exe --title "Music ID Tagger $version" --notes $notes
           }
           if ($LASTEXITCODE -ne 0) { throw "A kiadást nem sikerült közzétenni" }

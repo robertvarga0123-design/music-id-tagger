@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Callable
 
 from music_id_tagger.covers import cover_hash
-from music_id_tagger.match import clean, search_identity, to_camelot
+from music_id_tagger.match import clean, genre_is_generic, search_identity, to_camelot
 from music_id_tagger.tags import AUDIO_EXTENSIONS, read_cover_bytes, read_duration, read_tags, write_tags
 
 LogFn = Callable[[str, str], None]
@@ -34,6 +34,11 @@ class Options:
     beatport_by_file: dict = field(default_factory=dict)
     write_bpm_to_xml: bool = True
     use_open_catalogs: bool = True
+    use_deezer: bool = True
+    use_apple: bool = True
+    use_musicbrainz: bool = True
+    use_discogs: bool = True
+    use_websearch: bool = False
 
 
 @dataclass
@@ -178,10 +183,20 @@ def _blank(value) -> bool:
     return not clean(value)
 
 
+def provider_enabled(options: Options, name: str) -> bool:
+    """False means that provider is not called at all."""
+    if name in {"deezer", "apple", "musicbrainz", "discogs"} and not options.use_open_catalogs:
+        return False
+    return bool(getattr(options, f"use_{name}", False))
+
+
 def _without_consumer_genre(meta: dict) -> dict:
-    """Shazam and AcoustID genres are consumer labels, not DJ genres."""
+    """Drop a broad Shazam or AcoustID genre. A specific one may fill an empty field."""
     cleaned = dict(meta)
-    cleaned.pop("genre", None)
+    if genre_is_generic(cleaned.get("genre")):
+        cleaned.pop("genre", None)
+    elif cleaned.get("genre"):
+        cleaned["genre_from"] = "other"
     return cleaned
 
 
@@ -194,11 +209,11 @@ def _keep_fingerprint(meta: dict, existing: dict, filename: str) -> bool:
 def apply_meta(existing: dict, incoming: dict, keep_identity: bool) -> dict:
     """Meglévő és új tagek egyesítése.
 
-    A műfajt csak Beatport írja be. A Shazam „Dance / Pop” és az Apple „Dance”
-    nem DJ-stílus, üres mezőbe sem kerül. A hangnem és a kiadó csak
-    Beatport-forrásból írja felül a már bent lévőt, vagy ha a mező üres.
-    A BPM-et nem Beatport-forrás csak üres mezőbe írja, és a fele/duplája
-    tempót (70 vs 140) senki nem írja felül.
+    Műfajt felülírni csak a Beatport írhat. Üres mezőbe más forrás is írhat,
+    ha a címke nem általános (Dance, Pop, Electronic, Electronica, Music).
+    A hangnem és a kiadó csak Beatport-forrásból írja felül a már bent lévőt,
+    vagy ha a mező üres. A BPM-et nem Beatport-forrás csak üres mezőbe írja,
+    és a fele/duplája tempót (70 vs 140) senki nem írja felül.
     A már bent lévő, eltérő ISRC-t nem cseréljük ki.
     """
     from music_id_tagger.reconcile import bpm_half_time
@@ -207,7 +222,10 @@ def apply_meta(existing: dict, incoming: dict, keep_identity: bool) -> dict:
     identity = {"title", "artist", "album"}
     beatport_source = "beatport" in clean(incoming.get("source")).lower()
     for key, value in incoming.items():
-        if key in {"source", "match_score", "score", "shazam_id", "cover_hash", "duration"} or value in (None, ""):
+        if key in {"source", "match_score", "score", "shazam_id", "cover_hash", "duration", "genre_from"} or value in (
+            None,
+            "",
+        ):
             continue
         if key == "key":
             converted = to_camelot(value)
@@ -223,8 +241,12 @@ def apply_meta(existing: dict, incoming: dict, keep_identity: bool) -> dict:
             continue
         if key == "year" and keep_identity and not _blank(existing.get(key)):
             continue
-        if key == "genre" and not beatport_source:
-            continue
+        if key == "genre":
+            origin = clean(incoming.get("genre_from"))
+            from_beatport = origin == "beatport" or (origin != "other" and beatport_source)
+            if not from_beatport and (not _blank(existing.get(key)) or genre_is_generic(value)):
+                continue
+            merged["genre_from"] = "beatport" if from_beatport else "other"
         if key in {"key", "key_name", "label"} and not _blank(existing.get(key)) and not beatport_source:
             continue
         if key == "bpm" and not _blank(existing.get(key)):
@@ -352,6 +374,7 @@ async def _open_catalogs(
     title: str,
     stage,
     flog: LogFn,
+    options: Options,
     *,
     file_duration=None,
     file_cover_hash: str | None = None,
@@ -371,22 +394,40 @@ async def _open_catalogs(
         )
 
     isrc = clean(found.get("isrc"))
-    if isrc and _needs(found, "album", "year", "bpm", "label"):
+    if isrc and provider_enabled(options, "deezer") and _needs(found, "album", "year", "bpm", "label"):
         stage("deezer")
         take(await asyncio.to_thread(catalogs.deezer_by_isrc, isrc, flog))
-        if _needs(found, "album", "year"):
-            stage("musicbrainz")
-            take(await asyncio.to_thread(catalogs.musicbrainz_by_isrc, isrc, flog))
-    if artist and title and "deezer" not in clean(found.get("source")) and _needs(found, "bpm", "isrc", "album", "year"):
+    if isrc and provider_enabled(options, "musicbrainz") and _needs(found, "album", "year"):
+        stage("musicbrainz")
+        take(await asyncio.to_thread(catalogs.musicbrainz_by_isrc, isrc, flog))
+    if (
+        artist
+        and title
+        and provider_enabled(options, "deezer")
+        and "deezer" not in clean(found.get("source"))
+        and _needs(found, "bpm", "isrc", "album", "year")
+    ):
         stage("deezer")
         take(await asyncio.to_thread(catalogs.deezer_search, artist, title, flog, file_duration))
-    if artist and title and _needs(found, "album", "year"):
+    if artist and title and provider_enabled(options, "apple") and _needs(found, "album", "year"):
         stage("apple")
         take(await asyncio.to_thread(catalogs.itunes_search, artist, title, flog, file_duration))
-    if artist and title and "musicbrainz" not in clean(found.get("source")) and _needs(found, "album", "year", "isrc"):
+    if (
+        artist
+        and title
+        and provider_enabled(options, "musicbrainz")
+        and "musicbrainz" not in clean(found.get("source"))
+        and _needs(found, "album", "year", "isrc")
+    ):
         stage("musicbrainz")
         take(await asyncio.to_thread(catalogs.musicbrainz_search, artist, title, flog, file_duration))
-    if artist and title and "discogs" not in clean(found.get("source")) and _needs(found, "album", "year", "label", "catalog"):
+    if (
+        artist
+        and title
+        and provider_enabled(options, "discogs")
+        and "discogs" not in clean(found.get("source"))
+        and _needs(found, "album", "year", "label", "catalog")
+    ):
         stage("discogs")
         take(await asyncio.to_thread(catalogs.discogs_search, artist, title, flog, file_duration))
 
@@ -510,7 +551,20 @@ def _run(
             else "Egy AI kulcs van meg. A döntése sárga marad, amíg a Grok és a Gemini kulcs is bent van.",
         )
     if options.use_open_catalogs:
-        log("info", "Deezer, Apple, MusicBrainz és Discogs bekapcsolva. Ezekhez nem kell kulcs.")
+        names = [
+            label
+            for label, key in (
+                ("Deezer", "deezer"),
+                ("Apple", "apple"),
+                ("MusicBrainz", "musicbrainz"),
+                ("Discogs", "discogs"),
+            )
+            if provider_enabled(options, key)
+        ]
+        if names:
+            log("info", f"{', '.join(names)} bekapcsolva. Ezekhez nem kell kulcs.")
+    if options.use_websearch:
+        log("muted", "Webes keresés bekapcsolva: a számcímek a Bingnek kerülnek.")
 
     try:
         asyncio.run(_process(files, options, beatport, spotify, log, progress, cancel, stats, track))
@@ -614,7 +668,7 @@ async def _one(path: Path, options: Options, beatport, spotify, shazam, log: Log
     def stage(name: str) -> None:
         _emit(track, _file_key(path), path.name, name, "", "", "")
 
-    if shazam is not None:
+    if options.use_shazam and shazam is not None:
         stage("shazam")
         try:
             from music_id_tagger.identify import recognize_shazam
@@ -676,7 +730,7 @@ async def _one(path: Path, options: Options, beatport, spotify, shazam, log: Log
         guessed = False
 
     forced = _forced_beatport_id(path, options)
-    if beatport is not None and forced:
+    if provider_enabled(options, "beatport") and beatport is not None and forced:
         hit = await asyncio.to_thread(beatport.by_id, forced, flog)
         if hit:
             from music_id_tagger.reconcile import durations_compatible
@@ -705,13 +759,15 @@ async def _one(path: Path, options: Options, beatport, spotify, shazam, log: Log
                     found[key] = hit[key]
             found["beatport_id"] = forced
             found["match_score"] = 100
+            if hit.get("genre"):
+                found["genre_from"] = "beatport"
             previous = found.get("source")
             found["source"] = "beatport" if not previous else f"{previous}+beatport"
             guessed = False
             flog("ok", f"Beatport ID {forced}: {clean(hit.get('artist'))} - {clean(hit.get('title'))}")
 
     isrc = clean(found.get("isrc"))
-    if beatport is not None and isrc and not found.get("beatport_id"):
+    if provider_enabled(options, "beatport") and beatport is not None and isrc and not found.get("beatport_id"):
         stage("beatport")
         hit = await asyncio.to_thread(beatport.by_isrc, isrc, flog)
         if hit:
@@ -720,17 +776,30 @@ async def _one(path: Path, options: Options, beatport, spotify, shazam, log: Log
                 guessed = False
                 flog("ok", f"Beatport ID a hangmintából: {found.get('beatport_id')}")
 
-    if spotify is not None and query_artist and query_title:
+    if provider_enabled(options, "spotify") and spotify is not None and query_artist and query_title:
         stage("spotify")
         hit = await asyncio.to_thread(spotify.search, query_artist, query_title, flog, file_duration)
         take(hit, query_artist, query_title)
 
-    if beatport is not None and query_artist and query_title and not found.get("beatport_id"):
+    if (
+        provider_enabled(options, "beatport")
+        and beatport is not None
+        and query_artist
+        and query_title
+        and not found.get("beatport_id")
+    ):
         stage("beatport")
         hit = await asyncio.to_thread(beatport.search, query_artist, query_title, flog, file_duration)
         take(hit, query_artist, query_title)
 
-    if beatport is not None and query_artist and query_title and not found.get("beatport_id"):
+    if (
+        provider_enabled(options, "websearch")
+        and provider_enabled(options, "beatport")
+        and beatport is not None
+        and query_artist
+        and query_title
+        and not found.get("beatport_id")
+    ):
         await _web_beatport(found, query_artist, query_title, beatport, take, stage, flog)
 
     if options.use_open_catalogs:
@@ -740,12 +809,13 @@ async def _one(path: Path, options: Options, beatport, spotify, shazam, log: Log
             query_title,
             stage,
             flog,
+            options,
             file_duration=file_duration,
             file_cover_hash=file_cover_hash,
         )
 
     isrc_now = clean(found.get("isrc"))
-    if beatport is not None and isrc_now and not found.get("beatport_id"):
+    if provider_enabled(options, "beatport") and beatport is not None and isrc_now and not found.get("beatport_id"):
         stage("beatport")
         hit = await asyncio.to_thread(beatport.by_isrc, isrc_now, flog)
         if hit:

@@ -43,3 +43,26 @@ def test_empty_secret_does_not_erase_the_saved_blob(tmp_path, monkeypatch):
     assert "kept-grok" in text
     assert "kept-gemini" in text
     assert "abc" in text
+
+
+def test_forget_secrets_drops_saved_blobs(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    folder = tmp_path / "MusicIDTagger"
+    folder.mkdir()
+    (folder / "settings.json").write_text(
+        '{"spotify_client_secret_dpapi": "kept-blob", "beatport_password_dpapi": "kept-pass", "grok_key_dpapi": "kept-grok"}',
+        encoding="utf-8",
+    )
+    save_settings(
+        {
+            "remember_secrets": False,
+            "spotify_client_secret": "should-not-appear",
+            "beatport_password": "should-not-appear",
+            "grok_key": "should-not-appear",
+        }
+    )
+    text = (folder / "settings.json").read_text(encoding="utf-8")
+    assert "should-not-appear" not in text
+    assert "kept-blob" not in text
+    assert "kept-pass" not in text
+    assert "kept-grok" not in text

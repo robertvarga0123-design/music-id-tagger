@@ -33,6 +33,21 @@ _STOP = {
     "aka",
 }
 
+# Shazam és az Apple gyakran csak ennyit mond. Ez nem DJ-stílus.
+GENERIC_GENRES = ("Dance", "Pop", "Electronic", "Electronica", "Music")
+
+
+def genre_is_generic(value: Any) -> bool:
+    """True when the label is only a broad consumer genre, not a DJ style."""
+    text = clean(value)
+    if not text:
+        return False
+    for word in GENERIC_GENRES:
+        if re.search(rf"(?i)(?<![0-9A-Za-z]){re.escape(word)}(?![0-9A-Za-z])", text):
+            return True
+    return False
+
+
 # Camelot wheel. Open Key 1m/1d sits on 8A/8B (A minor / C major).
 CAMELOT_TO_NAME = {
     "1A": "G#m",

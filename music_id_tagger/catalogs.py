@@ -13,7 +13,7 @@ import threading
 import time
 from typing import Any, Callable
 
-from music_id_tagger.match import clean, score_track, year_from
+from music_id_tagger.match import clean, genre_is_generic, score_track, year_from
 from music_id_tagger.net import USER_AGENT, session_get
 from music_id_tagger.reconcile import duration_seconds, durations_compatible
 
@@ -143,7 +143,10 @@ def meta_from_itunes(item: dict) -> dict[str, Any] | None:
             duration = duration_seconds(float(millis) / 1000.0)
         except (TypeError, ValueError):
             duration = None
-    return {
+    genre = clean(item.get("primaryGenreName"))
+    if genre_is_generic(genre):
+        genre = ""
+    meta = {
         "title": title,
         "artist": artist,
         "album": clean(item.get("collectionName")) or None,
@@ -153,6 +156,9 @@ def meta_from_itunes(item: dict) -> dict[str, Any] | None:
         "source_url": url if url.startswith("https://music.apple.com/") or url.startswith("https://itunes.apple.com/") else None,
         "source": "apple",
     }
+    if genre:
+        meta["genre"] = genre
+    return meta
 
 
 def meta_from_musicbrainz(recording: dict, *, exact: bool = False) -> dict[str, Any] | None:

@@ -37,7 +37,7 @@ def beatport_ids_from_html(html: str) -> list[str]:
 
 def beatport_ids(artist: str, title: str, log: Callable[[str, str], None] | None = None) -> list[str]:
     from music_id_tagger.match import clean
-    from music_id_tagger.net import session_get
+    from music_id_tagger.net import USER_AGENT, session_get
 
     who = clean(artist)
     name = clean(title)
@@ -52,8 +52,8 @@ def beatport_ids(artist: str, title: str, log: Callable[[str, str], None] | None
         session,
         url,
         headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-            "Accept-Language": "en-US,en;q=0.9,hu;q=0.8",
+            "User-Agent": USER_AGENT,
+            "Accept-Language": "hu,en;q=0.8",
         },
         timeout=15,
         attempts=2,

@@ -1,14 +1,28 @@
-"""Look up the newest GitHub release and download the Windows installer."""
+"""Look up the newest GitHub release and download the Windows installer.
+
+The installer is started only when its SHA-256 matches the ``SHA256:`` line in
+the release notes, and only from this repository's GitHub download URL.
+"""
 
 from __future__ import annotations
 
+import hashlib
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 REPO = "robertvarga0123-design/music-id-tagger"
+INSTALLER_NAME = "MusicIDTagger-Setup.exe"
 _API = f"https://api.github.com/repos/{REPO}/releases/latest"
+_DOWNLOAD_PREFIX = f"https://github.com/{REPO}/releases/download/"
+_SHA_LINE = re.compile(r"^SHA256:\s*([0-9a-fA-F]{64})\s*$", re.M)
+_SHA = re.compile(r"^[0-9a-fA-F]{64}$")
+
+
+class UpdateError(Exception):
+    """The installer was not started."""
 
 
 def parse_version(text: str) -> tuple[int, ...]:
@@ -20,8 +34,19 @@ def is_newer(remote: str, current: str) -> bool:
     return parse_version(remote) > parse_version(current)
 
 
+def parse_sha256(body: str) -> str | None:
+    match = _SHA_LINE.search(body or "")
+    if not match:
+        return None
+    return match.group(1).lower()
+
+
+def allowed_download_url(url: str) -> bool:
+    return isinstance(url, str) and url.startswith(_DOWNLOAD_PREFIX)
+
+
 def check_update(current: str) -> dict | None:
-    """Return ``{version, url, name}`` when GitHub has a newer installer, else None."""
+    """Return ``{version, url, name, sha256}`` when GitHub has a newer installer."""
     import requests
 
     try:
@@ -38,43 +63,98 @@ def check_update(current: str) -> dict | None:
         body = response.json()
     except Exception:
         return None
+    if not isinstance(body, dict):
+        return None
     tag = str(body.get("tag_name") or "")
     if not is_newer(tag, current):
         return None
     asset = _installer_asset(body.get("assets") or [])
     if not asset:
         return None
-    return {"version": tag.lstrip("vV"), "url": asset["browser_download_url"], "name": asset.get("name") or "MusicIDTagger-Setup.exe"}
+    return {
+        "version": tag.lstrip("vV"),
+        "url": asset["browser_download_url"],
+        "name": INSTALLER_NAME,
+        "sha256": parse_sha256(str(body.get("body") or "")) or "",
+    }
 
 
 def _installer_asset(assets: list) -> dict | None:
-    setup = None
     for asset in assets:
         if not isinstance(asset, dict):
             continue
         name = str(asset.get("name") or "")
         url = str(asset.get("browser_download_url") or "")
-        if not url.startswith("https://"):
-            continue
-        if name.lower().endswith("-setup.exe") or "setup" in name.lower():
+        if name == INSTALLER_NAME and allowed_download_url(url):
             return asset
-        if name.lower().endswith(".exe"):
-            setup = asset
-    return setup
+    return None
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 256), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def download(url: str, dest: Path) -> None:
     import requests
 
+    if not allowed_download_url(url):
+        raise UpdateError("A frissítés címe nem a projekt GitHub kiadása, nem töltöm le.")
     dest.parent.mkdir(parents=True, exist_ok=True)
     temporary = dest.with_suffix(dest.suffix + ".part")
-    with requests.get(url, stream=True, timeout=60, headers={"User-Agent": "MusicIDTagger"}) as response:
-        response.raise_for_status()
-        with temporary.open("wb") as handle:
-            for chunk in response.iter_content(chunk_size=1024 * 256):
-                if chunk:
-                    handle.write(chunk)
-    temporary.replace(dest)
+    try:
+        with requests.get(url, stream=True, timeout=60, headers={"User-Agent": "MusicIDTagger"}) as response:
+            response.raise_for_status()
+            with temporary.open("wb") as handle:
+                for chunk in response.iter_content(chunk_size=1024 * 256):
+                    if chunk:
+                        handle.write(chunk)
+        temporary.replace(dest)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        raise
+
+
+def _discard(path: Path) -> None:
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        return
+    parent = path.parent
+    try:
+        if parent.name.startswith("MusicIDTagger-") and not any(parent.iterdir()):
+            parent.rmdir()
+    except OSError:
+        return
+
+
+def fetch_verified(url: str, expected_sha: str, *, directory: str | None = None) -> Path:
+    """Download the installer to a unique folder and keep it only if the hash matches.
+
+    A missing or different hash deletes the file and raises. The caller launches
+    nothing in that case.
+    """
+    if not allowed_download_url(url):
+        raise UpdateError("A frissítés címe nem a projekt GitHub kiadása, nem töltöm le.")
+    folder = Path(tempfile.mkdtemp(prefix="MusicIDTagger-", dir=directory))
+    dest = folder / INSTALLER_NAME
+    try:
+        download(url, dest)
+    except Exception:
+        _discard(dest)
+        raise
+    expected = (expected_sha or "").strip().lower()
+    if not _SHA.fullmatch(expected):
+        _discard(dest)
+        raise UpdateError("A kiadás leírásában nincs SHA256, a telepítőt töröltem, nem indítom el.")
+    actual = sha256_file(dest)
+    if actual != expected:
+        _discard(dest)
+        raise UpdateError("A telepítő SHA256-ja nem egyezik, töröltem, nem indítom el.")
+    return dest
 
 
 def launch_installer(path: Path) -> None:

@@ -358,27 +358,42 @@ def _download_cover(url: str) -> tuple[bytes, str] | None:
     return response.content, mime
 
 
+def changed_fields(before: dict, after: dict) -> dict:
+    """Tag fields whose value actually differs. Unchanged BPM is not rewritten."""
+    source = before or {}
+    incoming = after or {}
+    out: dict = {}
+    for key in ("title", "artist", "album", "genre", "year", "bpm", "key", "label", "isrc", "beatport_id"):
+        value = incoming.get(key)
+        if value in (None, ""):
+            continue
+        if clean(value) != clean(source.get(key)):
+            out[key] = value
+    return out
+
+
 def write_tags(path: Path, meta: dict[str, Any], dry_run: bool, embed_cover: bool) -> None:
     if dry_run:
         return
     before = snapshot_tags(path)
+    delta = changed_fields(read_tags(path), meta)
     ext = path.suffix.lower()
     comment = _comment(meta)
     cover = _download_cover(meta.get("cover_url") or "") if embed_cover and meta.get("cover_url") else None
     if ext == ".mp3":
-        _write_mp3(path, meta, comment, cover)
+        _write_mp3(path, delta, comment, cover)
     elif ext == ".flac":
-        _write_vorbis(path, meta, comment, cover, "flac")
+        _write_vorbis(path, delta, comment, cover, "flac")
     elif ext == ".ogg":
-        _write_vorbis(path, meta, comment, cover, "ogg")
+        _write_vorbis(path, delta, comment, cover, "ogg")
     elif ext == ".opus":
-        _write_vorbis(path, meta, comment, cover, "opus")
+        _write_vorbis(path, delta, comment, cover, "opus")
     elif ext in {".m4a", ".mp4"}:
-        _write_mp4(path, meta, comment, cover)
+        _write_mp4(path, delta, comment, cover)
     elif ext == ".wav":
-        _write_id3_audio(path, meta, comment, cover, "wav")
+        _write_id3_audio(path, delta, comment, cover, "wav")
     elif ext in {".aiff", ".aif"}:
-        _write_id3_audio(path, meta, comment, cover, "aiff")
+        _write_id3_audio(path, delta, comment, cover, "aiff")
     else:
         raise ValueError(f"Nem támogatott formátum: {ext}")
     from music_id_tagger.undo import record

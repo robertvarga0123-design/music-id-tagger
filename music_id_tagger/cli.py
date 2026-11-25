@@ -1,32 +1,58 @@
 from __future__ import annotations
 
 import argparse
+import getpass
+import os
+import sys
 import threading
 
 from music_id_tagger.engine import Options, run
 
+_ARG_WARNING = "A jelszó a parancssorban látszik. Használd a MIT_BEATPORT_PASS vagy a MIT_SPOTIFY_SECRET környezeti változót."
+
+
+def resolve_secret(argument: str, env_name: str, prompt: str, stdin_is_tty: bool, ask) -> tuple[str, str | None]:
+    """argument, then the environment, then getpass when stdin is a terminal."""
+    if argument:
+        return argument, _ARG_WARNING
+    env = os.environ.get(env_name) or ""
+    if env:
+        return env, None
+    if stdin_is_tty:
+        return ask(prompt) or "", None
+    return "", None
+
+
+def _stdin_is_tty() -> bool:
+    return bool(getattr(sys.stdin, "isatty", lambda: False)())
+
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Shazam hangminta + Beatport v4 tagger. A jelszót sehova nem menti."
+        description="Shazam hangminta + Beatport v4 tagger. A jelszót a környezeti változóban add meg."
     )
     parser.add_argument("paths", nargs="*", help="Mappák vagy fájlok")
     parser.add_argument("--undo", default="", help="Egy undo JSON visszaállítása")
     parser.add_argument("--beatport-user", default="", help="Beatport felhasználónév")
-    parser.add_argument("--beatport-pass", default="", help="Beatport jelszó, csak erre a futásra")
+    parser.add_argument("--beatport-pass", default="", help="Beatport jelszó. A folyamatlistában látszik, használd a MIT_BEATPORT_PASS változót.")
     parser.add_argument("--acoustid-key", default="", help="Opcionális AcoustID kulcs")
     parser.add_argument("--spotify-id", default="", help="Spotify Client ID")
-    parser.add_argument("--spotify-secret", default="", help="Spotify Client Secret, csak erre a futásra")
+    parser.add_argument("--spotify-secret", default="", help="Spotify Client Secret. A folyamatlistában látszik, használd a MIT_SPOTIFY_SECRET változót.")
     parser.add_argument("--grok-key", default="", help="xAI Grok API kulcs, csak erre a futásra")
     parser.add_argument("--gemini-key", default="", help="Google Gemini API kulcs, csak erre a futásra")
     parser.add_argument("--no-spotify", action="store_true")
     parser.add_argument("--no-shazam", action="store_true")
     parser.add_argument("--no-beatport", action="store_true")
+    parser.add_argument("--no-deezer", action="store_true")
+    parser.add_argument("--no-apple", action="store_true")
+    parser.add_argument("--no-musicbrainz", action="store_true")
+    parser.add_argument("--no-discogs", action="store_true")
+    parser.add_argument("--websearch", action="store_true", help="Bing keresés. A számcím kimegy a Bingnek.")
     parser.add_argument("--write", action="store_true", help="Tényleg írja a tageket. Enélkül csak próba.")
     parser.add_argument("--overwrite-identity", action="store_true", help="A meglévő címet és előadót is cseréli")
     parser.add_argument("--no-cover", action="store_true")
     parser.add_argument("--no-xml-bpm", action="store_true", help="A Rekordbox XML BPM mezőit nem írja")
-    parser.add_argument("--no-catalogs", action="store_true", help="Deezer, Apple és MusicBrainz kihagyása")
+    parser.add_argument("--no-catalogs", action="store_true", help="Deezer, Apple, MusicBrainz és Discogs kihagyása")
     parser.add_argument("--delay", type=float, default=1.0)
     args = parser.parse_args(argv)
 
@@ -47,14 +73,33 @@ def main(argv: list[str] | None = None) -> int:
     if not args.paths:
         parser.error("adj meg legalább egy mappát vagy fájlt")
 
+    beatport_pass, beatport_warn = resolve_secret(
+        args.beatport_pass,
+        "MIT_BEATPORT_PASS",
+        "Beatport jelszó: ",
+        _stdin_is_tty(),
+        getpass.getpass,
+    )
+    spotify_secret, spotify_warn = resolve_secret(
+        args.spotify_secret,
+        "MIT_SPOTIFY_SECRET",
+        "Spotify Client Secret: ",
+        _stdin_is_tty(),
+        getpass.getpass,
+    )
+    if beatport_warn:
+        log("muted", beatport_warn)
+    if spotify_warn:
+        log("muted", spotify_warn)
+
     options = Options(
         use_shazam=not args.no_shazam,
         use_beatport=not args.no_beatport,
         beatport_user=args.beatport_user,
-        beatport_password=args.beatport_pass,
-        use_spotify=not args.no_spotify and bool(args.spotify_id and args.spotify_secret),
+        beatport_password=beatport_pass,
+        use_spotify=not args.no_spotify and bool(args.spotify_id and spotify_secret),
         spotify_client_id=args.spotify_id,
-        spotify_client_secret=args.spotify_secret,
+        spotify_client_secret=spotify_secret,
         acoustid_key=args.acoustid_key,
         grok_key=args.grok_key,
         gemini_key=args.gemini_key,
@@ -64,6 +109,11 @@ def main(argv: list[str] | None = None) -> int:
         delay=args.delay,
         write_bpm_to_xml=not args.no_xml_bpm,
         use_open_catalogs=not args.no_catalogs,
+        use_deezer=not args.no_deezer,
+        use_apple=not args.no_apple,
+        use_musicbrainz=not args.no_musicbrainz,
+        use_discogs=not args.no_discogs,
+        use_websearch=args.websearch,
     )
 
     stats = run(args.paths, options, log, lambda done, total: None, threading.Event())

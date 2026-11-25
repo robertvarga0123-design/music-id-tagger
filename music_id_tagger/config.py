@@ -59,12 +59,22 @@ def _load_secret(data: dict | None, key: str) -> str:
 def save_settings(data: dict) -> None:
     previous = load_settings()
     clean = dict(data)
-    _store_secret(clean, previous, "beatport_password", "beatport_password_dpapi")
+    remember = clean.get("remember_secrets", True)
+    fields = (
+        ("beatport_password", "beatport_password_dpapi"),
+        ("spotify_client_secret", "spotify_client_secret_dpapi"),
+        ("grok_key", "grok_key_dpapi"),
+        ("gemini_key", "gemini_key_dpapi"),
+    )
     clean.pop("password", None)
-    _store_secret(clean, previous, "spotify_client_secret", "spotify_client_secret_dpapi")
     clean.pop("client_secret", None)
-    _store_secret(clean, previous, "grok_key", "grok_key_dpapi")
-    _store_secret(clean, previous, "gemini_key", "gemini_key_dpapi")
+    if remember is False:
+        for field, blob_name in fields:
+            clean.pop(field, None)
+            clean.pop(blob_name, None)
+    else:
+        for field, blob_name in fields:
+            _store_secret(clean, previous, field, blob_name)
     folder = settings_dir()
     folder.mkdir(parents=True, exist_ok=True)
     settings_path().write_text(

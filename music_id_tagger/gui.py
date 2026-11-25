@@ -204,14 +204,24 @@ class App(tk.Tk):
         self.use_shazam = tk.BooleanVar(value=True)
         self.use_beatport = tk.BooleanVar(value=True)
         self.use_spotify = tk.BooleanVar(value=True)
-        self.use_open_catalogs = tk.BooleanVar(value=True)
+        self.use_deezer = tk.BooleanVar(value=True)
+        self.use_apple = tk.BooleanVar(value=True)
+        self.use_musicbrainz = tk.BooleanVar(value=True)
+        self.use_discogs = tk.BooleanVar(value=True)
+        self.use_websearch = tk.BooleanVar(value=False)
+        self.forget_secrets = tk.BooleanVar(value=False)
         self.dry_run = tk.BooleanVar(value=True)
         self.keep_identity = tk.BooleanVar(value=True)
         self.embed_cover = tk.BooleanVar(value=True)
         self.write_bpm_to_xml = tk.BooleanVar(value=True)
         self._check(right, "Shazam hangminta", self.use_shazam)
         self._check(right, "Beatport (BPM, hangnem, stílus)", self.use_beatport)
-        self._check(right, "Deezer, Apple, MusicBrainz, Discogs", self.use_open_catalogs)
+        self._check(right, "Deezer", self.use_deezer)
+        self._check(right, "Apple", self.use_apple)
+        self._check(right, "MusicBrainz", self.use_musicbrainz)
+        self._check(right, "Discogs", self.use_discogs)
+        self._check(right, "Webes keresés", self.use_websearch)
+        tk.Label(right, text="A számcímek a Bingnek kerülnek.", bg=PAPER, fg=MUTED).pack(anchor="w", padx=28, pady=(0, 2))
         tk.Label(right, text="Beatport felhasználó", bg=PAPER, fg=MUTED).pack(anchor="w", padx=12, pady=(8, 0))
         self.user = self._entry(right)
         tk.Label(right, text="Jelszó  ·  erre a gépre emlékezik", bg=PAPER, fg=MUTED).pack(anchor="w", padx=12, pady=(8, 0))
@@ -232,6 +242,7 @@ class App(tk.Tk):
         self.grok_key = self._entry(right, secret=True)
         tk.Label(right, text="Gemini kulcs  ·  erre a gépre emlékezik", bg=PAPER, fg=MUTED).pack(anchor="w", padx=12, pady=(8, 0))
         self.gemini_key = self._entry(right, secret=True)
+        self._check(right, "Ne jegyezze meg a jelszavakat", self.forget_secrets)
         self._check(right, "Próba: ne írjon a fájlokba", self.dry_run)
         self._check(right, "Meglévő címet és előadót hagyja", self.keep_identity)
         self._check(right, "Borító mentése, ha még nincs", self.embed_cover)
@@ -435,26 +446,33 @@ class App(tk.Tk):
             self._add_path(str(path))
         if data.get("beatport_user"):
             self.user.insert(0, str(data["beatport_user"]))
-        remembered = load_password(data)
-        if remembered:
-            self.password.insert(0, remembered)
         if data.get("acoustid_key"):
             self.acoustid.insert(0, str(data["acoustid_key"]))
         if data.get("spotify_client_id"):
             self.spotify_id.insert(0, str(data["spotify_client_id"]))
-        remembered_spotify = load_spotify_secret(data)
-        if remembered_spotify:
-            self.spotify_secret.insert(0, remembered_spotify)
-        remembered_grok = load_grok_key(data)
-        if remembered_grok:
-            self.grok_key.insert(0, remembered_grok)
-        remembered_gemini = load_gemini_key(data)
-        if remembered_gemini:
-            self.gemini_key.insert(0, remembered_gemini)
+        if data.get("remember_secrets", True):
+            remembered = load_password(data)
+            if remembered:
+                self.password.insert(0, remembered)
+            remembered_spotify = load_spotify_secret(data)
+            if remembered_spotify:
+                self.spotify_secret.insert(0, remembered_spotify)
+            remembered_grok = load_grok_key(data)
+            if remembered_grok:
+                self.grok_key.insert(0, remembered_grok)
+            remembered_gemini = load_gemini_key(data)
+            if remembered_gemini:
+                self.gemini_key.insert(0, remembered_gemini)
+        catalogs = bool(data.get("use_open_catalogs", True))
         self.use_shazam.set(bool(data.get("use_shazam", True)))
         self.use_beatport.set(bool(data.get("use_beatport", True)))
         self.use_spotify.set(bool(data.get("use_spotify", True)))
-        self.use_open_catalogs.set(bool(data.get("use_open_catalogs", True)))
+        self.use_deezer.set(bool(data.get("use_deezer", catalogs)))
+        self.use_apple.set(bool(data.get("use_apple", catalogs)))
+        self.use_musicbrainz.set(bool(data.get("use_musicbrainz", catalogs)))
+        self.use_discogs.set(bool(data.get("use_discogs", catalogs)))
+        self.use_websearch.set(bool(data.get("use_websearch", False)))
+        self.forget_secrets.set(not bool(data.get("remember_secrets", True)))
         self.dry_run.set(bool(data.get("dry_run", True)))
         self.keep_identity.set(bool(data.get("keep_identity", True)))
         self.embed_cover.set(bool(data.get("embed_cover", True)))
@@ -478,10 +496,16 @@ class App(tk.Tk):
                 "acoustid_key": self.acoustid.get().strip(),
                 "grok_key": self.grok_key.get(),
                 "gemini_key": self.gemini_key.get(),
+                "remember_secrets": not self.forget_secrets.get(),
                 "use_shazam": self.use_shazam.get(),
                 "use_beatport": self.use_beatport.get(),
                 "use_spotify": self.use_spotify.get(),
-                "use_open_catalogs": self.use_open_catalogs.get(),
+                "use_deezer": self.use_deezer.get(),
+                "use_apple": self.use_apple.get(),
+                "use_musicbrainz": self.use_musicbrainz.get(),
+                "use_discogs": self.use_discogs.get(),
+                "use_websearch": self.use_websearch.get(),
+                "use_open_catalogs": True,
                 "dry_run": self.dry_run.get(),
                 "keep_identity": self.keep_identity.get(),
                 "embed_cover": self.embed_cover.get(),
@@ -496,8 +520,23 @@ class App(tk.Tk):
         if not self.paths:
             messagebox.showinfo("Music ID Tagger", "Előbb adj meg legalább egy mappát vagy fájlt.")
             return
-        if not self.use_shazam.get() and not self.use_beatport.get() and not self.use_spotify.get() and not self.use_open_catalogs.get() and not self.acoustid.get().strip():
-            messagebox.showinfo("Music ID Tagger", "Kapcsolj be legalább egy forrást: Shazam, Beatport, katalógus, Spotify vagy AcoustID.")
+        if not any(
+            (
+                self.use_shazam.get(),
+                self.use_beatport.get(),
+                self.use_spotify.get(),
+                self.use_deezer.get(),
+                self.use_apple.get(),
+                self.use_musicbrainz.get(),
+                self.use_discogs.get(),
+                self.use_websearch.get(),
+                bool(self.acoustid.get().strip()),
+            )
+        ):
+            messagebox.showinfo(
+                "Music ID Tagger",
+                "Kapcsolj be legalább egy forrást: Shazam, Beatport, Deezer, Apple, MusicBrainz, Discogs, Spotify vagy AcoustID.",
+            )
             return
         self._persist()
         try:
@@ -521,7 +560,12 @@ class App(tk.Tk):
             delay=delay,
             beatport_by_file=dict(self.beatport_links),
             write_bpm_to_xml=self.write_bpm_to_xml.get(),
-            use_open_catalogs=self.use_open_catalogs.get(),
+            use_open_catalogs=True,
+            use_deezer=self.use_deezer.get(),
+            use_apple=self.use_apple.get(),
+            use_musicbrainz=self.use_musicbrainz.get(),
+            use_discogs=self.use_discogs.get(),
+            use_websearch=self.use_websearch.get(),
         )
         self.cancel = threading.Event()
         self.urls.clear()
@@ -696,16 +740,13 @@ class App(tk.Tk):
         self.after(0, finish)
 
     def _download_update(self, info: dict) -> None:
-        import tempfile
+        from music_id_tagger.updatecheck import fetch_verified, launch_installer
 
-        from music_id_tagger.updatecheck import download, launch_installer
-
-        dest = Path(tempfile.gettempdir()) / "MusicIDTagger-Setup.exe"
         try:
-            download(info["url"], dest)
+            dest = fetch_verified(str(info.get("url") or ""), str(info.get("sha256") or ""))
         except Exception as exc:
             message = str(exc)
-            self.after(0, lambda message=message: messagebox.showerror("Music ID Tagger", f"A frissítést nem tudtam letölteni: {message}"))
+            self.after(0, lambda message=message: messagebox.showerror("Music ID Tagger", message))
             return
 
         def install() -> None:

@@ -79,6 +79,12 @@ def main() -> int:
             embed_cover=_bool(raw.get("embed_cover"), True),
             delay=0.25,
             beatport_by_file=_id_map(raw.get("beatport_by_file")),
+            use_open_catalogs=_bool(raw.get("use_open_catalogs"), True),
+            use_deezer=_bool(raw.get("use_deezer"), True),
+            use_apple=_bool(raw.get("use_apple"), True),
+            use_musicbrainz=_bool(raw.get("use_musicbrainz"), True),
+            use_discogs=_bool(raw.get("use_discogs"), True),
+            use_websearch=_bool(raw.get("use_websearch"), False),
         )
         logs: list[dict[str, str]] = []
 

@@ -46,6 +46,18 @@ def test_itunes_ignores_broad_genre():
     assert 247 < meta["duration"] < 249
     assert "genre" not in meta
     assert meta["source_url"].startswith("https://music.apple.com/")
+    specific = meta_from_itunes(
+        {
+            "trackName": "Losing It",
+            "artistName": "FISHER",
+            "collectionName": "Losing It - Single",
+            "releaseDate": "2018-07-13T12:00:00Z",
+            "trackTimeMillis": 248036,
+            "primaryGenreName": "Tech House",
+            "trackViewUrl": "https://music.apple.com/us/album/losing-it/1?i=2",
+        }
+    )
+    assert specific["genre"] == "Tech House"
 
 
 def test_musicbrainz_isrc_recording():
@@ -150,6 +162,33 @@ def test_beatport_replaces_genre_and_refuses_half_time():
     assert found["key"] == "9B"
     assert bpm_half_time(70, 140) is True
     assert bpm_half_time(128, 130) is False
+    empty = {"title": "Losing It", "artist": "FISHER", "source": "shazam"}
+    merge_hit(
+        empty,
+        {"title": "Losing It", "artist": "FISHER", "genre": "Tech House", "source": "deezer", "match_score": 18},
+        "FISHER",
+        "Losing It",
+        audio=True,
+    )
+    assert empty["genre"] == "Tech House"
+    generic = {"title": "Losing It", "artist": "FISHER", "source": "shazam"}
+    merge_hit(
+        generic,
+        {"title": "Losing It", "artist": "FISHER", "genre": "Dance", "source": "deezer", "match_score": 18},
+        "FISHER",
+        "Losing It",
+        audio=True,
+    )
+    assert "genre" not in generic
+    held = {"title": "Losing It", "artist": "FISHER", "genre": "House", "source": "shazam"}
+    merge_hit(
+        held,
+        {"title": "Losing It", "artist": "FISHER", "genre": "Tech House", "source": "deezer", "match_score": 18},
+        "FISHER",
+        "Losing It",
+        audio=True,
+    )
+    assert held["genre"] == "House"
 
 
 def test_apply_meta_keeps_file_bpm_against_half_time_and_non_beatport():
