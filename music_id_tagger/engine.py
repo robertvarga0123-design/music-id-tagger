@@ -39,6 +39,14 @@ class Options:
     use_musicbrainz: bool = True
     use_discogs: bool = True
     use_websearch: bool = False
+    defer_write: bool = True
+    rescan: bool = False
+    fill_missing_only: bool = False
+    tag_first: bool = False
+    key_format: str = "camelot"
+    rename_template: str = ""
+    enabled_fields: dict = field(default_factory=dict)
+    genre_map: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -64,6 +72,8 @@ class Stats:
     cancelled: bool = False
     files: list[FileResult] = field(default_factory=list)
     by_path: dict = field(default_factory=dict)
+    pending: list = field(default_factory=list)
+    xmls: list = field(default_factory=list)
 
 
 _PUBLIC_META_KEYS = (
@@ -508,7 +518,12 @@ def _run(
         return stats
     log(
         "info",
-        f"{len(files)} fájl. {'Próba mód, semmi nem íródik.' if options.dry_run else 'A tagek beíródnak a fájlokba.'}",
+        f"{len(files)} fájl. "
+        + (
+            "Keresés. A fájlok még nem változnak."
+            if options.dry_run or getattr(options, "defer_write", True)
+            else "A tagek beíródnak a fájlokba."
+        ),
     )
     for path in files:
         _emit(track, _file_key(path), path.name, "wait", "", "", "")
@@ -574,7 +589,7 @@ def _run(
     if cancel.is_set():
         stats.cancelled = True
         log("muted", "Megállítva.")
-    else:
+    elif not getattr(options, "defer_write", True):
         for xml in xmls:
             try:
                 changed, missing, notes = update_library(
@@ -590,7 +605,15 @@ def _run(
                 log("ok", note)
             if changed and not options.dry_run:
                 log("ok", f"Biztonsági másolat: {xml.name}.bak")
-    mode = "A fájlok nem változtak." if options.dry_run else "A találatok be lettek írva."
+    elif xmls:
+        log("muted", "A Rekordbox XML az Alkalmazás lépésben frissül.")
+    stats.xmls = [str(item) for item in xmls]
+    if getattr(options, "defer_write", True):
+        mode = "Az írás külön lépés, a fájlok még nem változtak."
+    elif options.dry_run:
+        mode = "A fájlok nem változtak."
+    else:
+        mode = "A találatok be lettek írva."
     log(
         "info",
         f"Kész. Siker: {stats.ok}, nincs találat: {stats.missed}, hiba: {stats.failed}. {mode}",
@@ -642,6 +665,258 @@ async def _process(files, options: Options, beatport, spotify, log: LogFn, progr
             await context.__aexit__(None, None, None)
 
 
+def _beatport_rows(beatport, artist: str, title: str, flog: LogFn, file_duration) -> tuple[dict | None, list]:
+    """Top matches from one search. Stubs without ``ranked`` still work."""
+    ranked = getattr(beatport, "ranked", None)
+    if callable(ranked):
+        try:
+            raw = ranked(artist, title, flog, file_duration)
+        except TypeError:
+            raw = ranked(artist, title, flog)
+        rows = [item for item in raw if isinstance(item, dict)] if isinstance(raw, list) else []
+        return (rows[0] if rows else None), rows
+    search = getattr(beatport, "search", None)
+    if not callable(search):
+        return None, []
+    try:
+        hit = search(artist, title, flog, file_duration)
+    except TypeError:
+        hit = search(artist, title, flog)
+    if isinstance(hit, list):
+        rows = [item for item in hit if isinstance(item, dict)]
+        return (rows[0] if rows else None), rows
+    if isinstance(hit, dict):
+        return hit, [hit]
+    return None, []
+
+
+def _jsonable_meta(meta: dict | None) -> dict:
+    out: dict = {}
+    for key, value in (meta or {}).items():
+        if isinstance(value, bool) or value is None:
+            continue
+        if isinstance(value, (str, int, float)):
+            out[str(key)] = value
+    return out
+
+
+def _public_candidate(item: dict) -> dict:
+    out: dict = {}
+    for key in (
+        "title",
+        "artist",
+        "mix",
+        "bpm",
+        "key",
+        "genre",
+        "cover_url",
+        "label",
+        "isrc",
+        "beatport_id",
+        "source_url",
+        "match_score",
+    ):
+        value = item.get(key)
+        if isinstance(value, bool) or value in (None, ""):
+            continue
+        out[key] = value if isinstance(value, (str, int, float)) else str(value)
+    if "match_score" in out:
+        out["score"] = out["match_score"]
+    return out
+
+
+def _remember(path: Path, found: dict, candidates: list, guessed: bool, origin: str, status: str, unsure: bool, flog: LogFn) -> None:
+    try:
+        from music_id_tagger.cache import store
+
+        store(
+            path,
+            {
+                "found": _jsonable_meta(found),
+                "candidates": [_public_candidate(item) for item in candidates if isinstance(item, dict)],
+                "guessed": bool(guessed),
+                "origin": origin or "",
+                "status": status,
+            },
+            clean(found.get("source")),
+            bool(unsure),
+        )
+    except Exception as exc:
+        flog("muted", f"Cache írás kihagyva: {exc}")
+
+
+def _record_pending(
+    stats: Stats,
+    path: Path,
+    status: str,
+    before: dict,
+    after: dict,
+    found: dict,
+    unsure: bool,
+    candidates: list,
+    url: str,
+    label: str,
+    duration,
+    options: Options,
+) -> None:
+    from music_id_tagger.pending import Pending, confidence_of, preview_changes
+
+    try:
+        shown = str(path.resolve())
+    except OSError:
+        shown = str(path)
+    item = Pending(
+        path=shown,
+        name=path.name,
+        status=status,
+        before=_jsonable_meta(before),
+        after=_jsonable_meta(after),
+        source=clean((found or {}).get("source")),
+        confidence=confidence_of(found, unsure, status),
+        unsure=bool(unsure) or status == "unsure",
+        candidates=[_public_candidate(row) for row in candidates if isinstance(row, dict)],
+        source_url=url if isinstance(url, str) and url.startswith("https://") else "",
+        source_label=label if isinstance(url, str) and url.startswith("https://") else "",
+        duration=duration if isinstance(duration, (int, float)) and not isinstance(duration, bool) else None,
+    )
+    item.changed = preview_changes(
+        item,
+        getattr(options, "enabled_fields", None) or {},
+        bool(getattr(options, "fill_missing_only", False)),
+        getattr(options, "key_format", "camelot") or "camelot",
+        getattr(options, "genre_map", None) or {},
+    )
+    stats.pending.append(item)
+
+
+def _skip_filled(path, options, existing, has_cover, flog, stats, track, lines, file_duration) -> bool:
+    if not getattr(options, "fill_missing_only", False):
+        return False
+    from music_id_tagger.pending import needs_lookup
+
+    if needs_lookup(existing, getattr(options, "enabled_fields", None) or {}, has_cover):
+        return False
+    flog("muted", f"Minden kért mező megvan, kihagyom: {path.name}")
+    _record_pending(stats, path, "skipped", existing, existing, {}, False, [], "", "", file_duration, options)
+    _push_file(stats, path.name, "skipped", existing, {}, lines, unsure=False)
+    _emit(track, _file_key(path), path.name, "ok", "Kihagyva, megvan", "", "")
+    return True
+
+
+async def _finish_file(
+    path: Path,
+    options: Options,
+    existing: dict,
+    found: dict,
+    lines: list,
+    guessed: bool,
+    origin: str,
+    candidates: list,
+    flog: LogFn,
+    stats: Stats,
+    track,
+    forced: bool,
+    file_duration,
+    stage,
+    *,
+    from_cache: bool = False,
+    cached_status: str = "",
+    cached_unsure: bool = False,
+) -> None:
+    from music_id_tagger.beatport import parse_beatport_id
+    from music_id_tagger.match import is_uncertain
+
+    ident = parse_beatport_id(found.get("source_url")) or parse_beatport_id(found.get("beatport_id"))
+    if ident:
+        found["beatport_id"] = ident
+        if "beatport.com/track/" not in clean(found.get("source_url")):
+            found["source_url"] = f"https://www.beatport.com/track/{ident}"
+    url = clean(found.get("source_url"))
+    label = _source_label(url, ident or "")
+    useful = any(found.get(key) for key in ("title", "artist", "genre", "bpm", "key", "beatport_id"))
+    if from_cache and cached_status in {"missed", "rejected"}:
+        useful = False
+    defer = getattr(options, "defer_write", True)
+    weak = not useful and bool(candidates) and (not from_cache or cached_status == "unsure")
+    if not useful and not weak:
+        if not from_cache:
+            _remember(path, found, candidates, guessed, origin, "missed", True, flog)
+        stats.missed += 1
+        flog("muted", f"Nincs találat: {path.name}")
+        _record_pending(stats, path, "missed", existing, existing, found, True, candidates, url, label, file_duration, options)
+        _push_file(stats, path.name, "missed", existing, found, lines, unsure=True, source_url=url, source_label=label)
+        _emit(track, _file_key(path), path.name, "missed", "Nincs találat", url, label)
+        return
+
+    final_keep = options.keep_identity and origin != "conflict-file"
+    if origin == "conflict-file" and options.keep_identity:
+        flog("muted", "A bent lévő cím nem a fájlnévhez tartozik, a találat cseréli.")
+    if from_cache:
+        unsure = bool(cached_unsure) or weak
+    else:
+        unsure = True if weak else is_uncertain(found, guessed)
+    if useful and (options.grok_key or options.gemini_key) and not forced and not from_cache and unsure:
+        stage("ai")
+        from music_id_tagger.judge import review
+
+        verdict = await asyncio.to_thread(
+            review,
+            path.name,
+            existing,
+            found,
+            file_duration,
+            options.grok_key,
+            options.gemini_key,
+            flog,
+        )
+        if verdict.used and not verdict.accept:
+            _remember(path, found, candidates, guessed, origin, "missed", True, flog)
+            stats.missed += 1
+            flog("muted", f"AI nem engedi a találatot, a fájl marad: {path.name}")
+            _record_pending(stats, path, "missed", existing, existing, found, True, candidates, url, label, file_duration, options)
+            _push_file(stats, path.name, "missed", existing, found, lines, unsure=True, source_url=url, source_label=label)
+            _emit(track, _file_key(path), path.name, "rejected", "AI elutasította", url, label)
+            return
+        if verdict.confirmed >= 2:
+            unsure = False
+        elif verdict.confirmed == 1:
+            unsure = True
+    final = apply_meta(existing, found, keep_identity=final_keep) if useful else dict(existing)
+    if unsure and not weak:
+        flog("muted", f"Bizonytalan találat, nézd meg a forrást: {path.name}")
+    if weak:
+        flog("muted", f"Bizonytalan Beatport-találatok, válassz: {path.name}")
+    if not defer and useful:
+        prefix = "PRÓBA" if options.dry_run else "ÍRVA"
+        stage("write")
+        try:
+            await asyncio.to_thread(write_tags, path, final, options.dry_run, options.embed_cover)
+        except Exception as exc:
+            stats.failed += 1
+            flog("err", f"Tag írás hiba ({path.name}): {exc}")
+            _record_pending(stats, path, "failed", existing, final, found, True, candidates, url, label, file_duration, options)
+            _push_file(stats, path.name, "failed", final, found, lines, unsure=True, source_url=url, source_label=label)
+            _emit(track, _file_key(path), path.name, "failed", "Hiba", url, label)
+            return
+        try:
+            from music_id_tagger.rekordbox import path_key
+
+            stats.by_path[path_key(path)] = final
+        except OSError:
+            pass
+    else:
+        prefix = "TERV"
+    if not from_cache:
+        _remember(path, found, candidates, guessed, origin, "unsure" if weak else "ok", unsure or weak, flog)
+    stats.ok += 1
+    flog("ok", f"{prefix}: {path.name} → {_line(final)}")
+    state = "unsure" if unsure or weak else "ok"
+    row_status = "unsure" if weak else "ok"
+    _record_pending(stats, path, row_status, existing, final, found, unsure or weak, candidates, url, label, file_duration, options)
+    _push_file(stats, path.name, row_status, final, found, lines, unsure=unsure or weak, source_url=url, source_label=label)
+    _emit(track, _file_key(path), path.name, state, _line(final), url, label)
+
+
 async def _one(path: Path, options: Options, beatport, spotify, shazam, log: LogFn, stats: Stats, track) -> None:
     lines: list[dict[str, str]] = []
 
@@ -653,6 +928,10 @@ async def _one(path: Path, options: Options, beatport, spotify, shazam, log: Log
     found: dict = {}
     file_duration = read_duration(path)
     file_cover_hash = cover_hash(read_cover_bytes(path))
+    candidates: list = []
+    searched_beatport = False
+    tag_artist = clean(existing.get("artist"))
+    tag_title = clean(existing.get("title"))
 
     def take(hit: dict | None, artist: str, title: str) -> str:
         return _take(
@@ -668,7 +947,50 @@ async def _one(path: Path, options: Options, beatport, spotify, shazam, log: Log
     def stage(name: str) -> None:
         _emit(track, _file_key(path), path.name, name, "", "", "")
 
-    if options.use_shazam and shazam is not None:
+    if _skip_filled(path, options, existing, bool(file_cover_hash), flog, stats, track, lines, file_duration):
+        return
+    if not getattr(options, "rescan", False):
+        try:
+            from music_id_tagger.cache import lookup
+
+            payload = lookup(path)
+        except Exception:
+            payload = None
+        if isinstance(payload, dict):
+            flog("muted", f"Cache találat, nincs hálózati hívás: {path.name}")
+            cached_found = dict(payload.get("found") or {})
+            cached_rows = payload.get("candidates") if isinstance(payload.get("candidates"), list) else []
+            await _finish_file(
+                path,
+                options,
+                existing,
+                cached_found,
+                lines,
+                bool(payload.get("guessed")),
+                str(payload.get("origin") or ""),
+                cached_rows,
+                flog,
+                stats,
+                track,
+                True,
+                file_duration,
+                stage,
+                from_cache=True,
+                cached_status=str(payload.get("status") or ""),
+                cached_unsure=bool(payload.get("unsure")),
+            )
+            return
+
+    tag_first = bool(getattr(options, "tag_first", False))
+    if tag_first and tag_artist and tag_title and provider_enabled(options, "beatport") and beatport is not None:
+        stage("beatport")
+        hit, rows = await asyncio.to_thread(_beatport_rows, beatport, tag_artist, tag_title, flog, file_duration)
+        candidates = rows
+        searched_beatport = True
+        if hit:
+            take(hit, tag_artist, tag_title)
+
+    if options.use_shazam and shazam is not None and not (tag_first and found.get("beatport_id")):
         stage("shazam")
         try:
             from music_id_tagger.identify import recognize_shazam
@@ -787,9 +1109,16 @@ async def _one(path: Path, options: Options, beatport, spotify, shazam, log: Log
         and query_artist
         and query_title
         and not found.get("beatport_id")
+        and not (
+            searched_beatport
+            and clean(query_artist).lower() == tag_artist.lower()
+            and clean(query_title).lower() == tag_title.lower()
+        )
     ):
         stage("beatport")
-        hit = await asyncio.to_thread(beatport.search, query_artist, query_title, flog, file_duration)
+        hit, rows = await asyncio.to_thread(_beatport_rows, beatport, query_artist, query_title, flog, file_duration)
+        if rows:
+            candidates = rows
         take(hit, query_artist, query_title)
 
     if (
@@ -824,76 +1153,22 @@ async def _one(path: Path, options: Options, beatport, spotify, shazam, log: Log
                 if found.get("beatport_id"):
                     flog("ok", f"Beatport ID a katalógus ISRC-jéből: {found.get('beatport_id')}")
 
-    useful = any(found.get(key) for key in ("title", "artist", "genre", "bpm", "key", "beatport_id"))
-    from music_id_tagger.beatport import parse_beatport_id
-    from music_id_tagger.match import is_uncertain
-
-    ident = parse_beatport_id(found.get("source_url")) or parse_beatport_id(found.get("beatport_id"))
-    if ident:
-        found["beatport_id"] = ident
-        if "beatport.com/track/" not in clean(found.get("source_url")):
-            found["source_url"] = f"https://www.beatport.com/track/{ident}"
-    url = clean(found.get("source_url"))
-    label = _source_label(url, ident or "")
-    if not useful:
-        stats.missed += 1
-        flog("muted", f"Nincs találat: {path.name}")
-        _push_file(stats, path.name, "missed", existing, found, lines, unsure=True, source_url=url, source_label=label)
-        _emit(track, _file_key(path), path.name, "missed", "Nincs találat", url, label)
-        return
-
-    final_keep = options.keep_identity and origin != "conflict-file"
-    if origin == "conflict-file" and options.keep_identity:
-        flog("muted", "A bent lévő cím nem a fájlnévhez tartozik, a találat cseréli.")
-    unsure = is_uncertain(found, guessed)
-    if (options.grok_key or options.gemini_key) and not forced and unsure:
-        stage("ai")
-        from music_id_tagger.judge import review
-
-        verdict = await asyncio.to_thread(
-            review,
-            path.name,
-            existing,
-            found,
-            file_duration,
-            options.grok_key,
-            options.gemini_key,
-            flog,
-        )
-        if verdict.used and not verdict.accept:
-            stats.missed += 1
-            flog("muted", f"AI nem engedi a találatot, a fájl marad: {path.name}")
-            _push_file(stats, path.name, "missed", existing, found, lines, unsure=True, source_url=url, source_label=label)
-            _emit(track, _file_key(path), path.name, "rejected", "AI elutasította", url, label)
-            return
-        if verdict.confirmed >= 2:
-            unsure = False
-        elif verdict.confirmed == 1:
-            unsure = True
-    final = apply_meta(existing, found, keep_identity=final_keep)
-    if unsure:
-        flog("muted", f"Bizonytalan találat, nézd meg a forrást: {path.name}")
-    prefix = "PRÓBA" if options.dry_run else "ÍRVA"
-    stage("write")
-    try:
-        await asyncio.to_thread(write_tags, path, final, options.dry_run, options.embed_cover)
-    except Exception as exc:
-        stats.failed += 1
-        flog("err", f"Tag írás hiba ({path.name}): {exc}")
-        _push_file(stats, path.name, "failed", final, found, lines, unsure=True, source_url=url, source_label=label)
-        _emit(track, _file_key(path), path.name, "failed", "Hiba", url, label)
-        return
-    stats.ok += 1
-    flog("ok", f"{prefix}: {path.name} → {_line(final)}")
-    try:
-        from music_id_tagger.rekordbox import path_key
-
-        stats.by_path[path_key(path)] = final
-    except OSError:
-        pass
-    state = "unsure" if unsure else "ok"
-    _push_file(stats, path.name, "ok", final, found, lines, unsure=unsure, source_url=url, source_label=label)
-    _emit(track, _file_key(path), path.name, state, _line(final), url, label)
+    await _finish_file(
+        path,
+        options,
+        existing,
+        found,
+        lines,
+        guessed,
+        origin,
+        candidates,
+        flog,
+        stats,
+        track,
+        bool(forced),
+        file_duration,
+        stage,
+    )
 
 
 async def _sleep(seconds: float, cancel) -> None:

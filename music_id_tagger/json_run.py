@@ -85,6 +85,14 @@ def main() -> int:
             use_musicbrainz=_bool(raw.get("use_musicbrainz"), True),
             use_discogs=_bool(raw.get("use_discogs"), True),
             use_websearch=_bool(raw.get("use_websearch"), False),
+            defer_write=True,
+            rescan=_bool(raw.get("rescan"), False),
+            fill_missing_only=_bool(raw.get("fill_missing_only"), False),
+            tag_first=_bool(raw.get("tag_first"), False),
+            key_format=_text(raw.get("key_format")) or "camelot",
+            rename_template=_text(raw.get("rename_template")),
+            enabled_fields=raw.get("enabled_fields") if isinstance(raw.get("enabled_fields"), dict) else {},
+            genre_map=raw.get("genre_map") if isinstance(raw.get("genre_map"), dict) else {},
         )
         logs: list[dict[str, str]] = []
 
@@ -92,6 +100,11 @@ def main() -> int:
             logs.append({"level": level, "message": message})
 
         stats = run(paths, options, log, lambda _done, _total: None, _Cancel())
+        applied = 0
+        if not options.dry_run:
+            from music_id_tagger.pending import apply_pending, select_for_apply
+
+            applied = apply_pending(select_for_apply(list(stats.pending), "all"), options, log, list(stats.xmls))
         _write(
             out,
             {
@@ -101,6 +114,7 @@ def main() -> int:
                 "failed": stats.failed,
                 "cancelled": stats.cancelled,
                 "dry_run": options.dry_run,
+                "applied": applied,
                 "log": logs,
                 "files": [asdict(item) for item in stats.files],
             },

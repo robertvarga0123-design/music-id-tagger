@@ -55,6 +55,23 @@ def list_runs() -> list[Path]:
     return sorted(folder.glob("*.json"), reverse=True)
 
 
+def record_rename(source: Path, dest: Path) -> None:
+    """Remember a rename so Visszavonás can move the file back."""
+    stat = dest.stat()
+    item = {
+        "kind": "rename",
+        "path": str(dest),
+        "source": str(source),
+        "mtime_ns": stat.st_mtime_ns,
+        "before": {},
+        "after": {},
+    }
+    if _open_items is not None:
+        _open_items.append(item)
+        return
+    _write([item])
+
+
 def revert(run_file: Path, log: Callable[[str, str], None], confirm: Callable[[Path], bool] | None = None) -> int:
     """Restore fields this program wrote. Returns how many files were restored.
 
@@ -67,8 +84,18 @@ def revert(run_file: Path, log: Callable[[str, str], None], confirm: Callable[[P
     if not isinstance(payload, list):
         raise ValueError("Az undo fájl nem lista.")
     restored = 0
-    for item in payload:
+    for item in reversed(payload):
         if not isinstance(item, dict):
+            continue
+        if item.get("kind") == "rename":
+            current = Path(str(item.get("path") or ""))
+            source = Path(str(item.get("source") or ""))
+            if current.is_file() and not source.exists():
+                current.rename(source)
+                restored += 1
+                log("ok", f"Visszanevezve: {source.name}")
+            else:
+                log("err", f"Az átnevezést nem tudom visszavonni: {current.name}")
             continue
         path = Path(str(item.get("path") or ""))
         if not path.is_file():

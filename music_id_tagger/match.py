@@ -312,6 +312,47 @@ def best_track(tracks: list, artist: str, title: str, minimum: int = 5) -> tuple
     return best, best_score
 
 
+def rank_tracks(tracks: list, artist: str, title: str, limit: int = 3, minimum: int = 5) -> list[tuple[dict, int]]:
+    """Highest scoring tracks, best first. Ties keep the catalog order."""
+    scored: list[tuple[dict, int]] = []
+    for track in tracks:
+        if not isinstance(track, dict):
+            continue
+        current = score_track(track, artist, title)
+        if current >= minimum:
+            scored.append((track, current))
+    scored.sort(key=lambda item: item[1], reverse=True)
+    return scored[:limit]
+
+
+def camelot_to_open(code: Any) -> str | None:
+    """8A → 1m, 8B → 1d. Inverse of the Open Key table in ``to_camelot``."""
+    camelot = to_camelot(code)
+    if not camelot:
+        return None
+    number = int(camelot[:-1])
+    letter = camelot[-1]
+    if letter not in {"A", "B"} or not 1 <= number <= 12:
+        return None
+    opened = (number - 7) % 12
+    if opened == 0:
+        opened = 12
+    return f"{opened}{'m' if letter == 'A' else 'd'}"
+
+
+def format_key(value: Any, style: str = "camelot") -> str:
+    """Write the key as Camelot, Open Key or the traditional name."""
+    camelot = to_camelot(value)
+    if not camelot:
+        return clean(value)
+    wanted = clean(style).lower() or "camelot"
+    if wanted == "open":
+        return camelot_to_open(camelot) or camelot
+    if wanted in {"traditional", "musical", "classic"}:
+        return camelot_name(camelot) or camelot
+    return camelot
+
+
 def same_recording(artist: str, title: str, other_artist: str, other_title: str) -> bool:
     """True when two names are the same track, not merely a shared word."""
     if not clean(artist) or not clean(title) or not clean(other_artist) or not clean(other_title):

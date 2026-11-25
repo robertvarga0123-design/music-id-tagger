@@ -6,7 +6,6 @@ from urllib.parse import parse_qs, urlparse
 
 from music_id_tagger.match import (
     beatport_genre,
-    best_track,
     camelot_or_name,
     clean,
     musical_key_name,
@@ -239,20 +238,27 @@ class BeatportClient:
             self.refresh_token = body["refresh_token"]
         return bool(body.get("access_token"))
 
+    def ranked(self, artist: str, title: str, log: Callable[[str, str], None] | None = None, file_duration=None) -> list:
+        return self._ranked(artist, title, log, file_duration)
+
     def search(self, artist: str, title: str, log: Callable[[str, str], None] | None = None, file_duration=None) -> dict[str, Any] | None:
+        rows = self._ranked(artist, title, log, file_duration)
+        return rows[0] if rows else None
+
+    def _ranked(self, artist: str, title: str, log: Callable[[str, str], None] | None, file_duration) -> list:
         if not self.access_token or not clean(artist) or not clean(title):
-            return None
+            return []
         query = f"{clean(artist)} {clean(title)}"
         response = self._get_search(query)
         if response is None:
-            return None
+            return []
         if response.status_code == 401 and self._refresh():
             response = self._get_search(query)
         if response is None or response.status_code != 200:
             code = response.status_code if response is not None else 0
             if log:
                 log("err", f"Beatport keresés hiba ({code}).")
-            return None
+            return []
         data = response.json()
         tracks = data.get("tracks") or data.get("results") or []
         if isinstance(tracks, dict):
@@ -263,18 +269,20 @@ class BeatportClient:
         if not tracks and dropped:
             if log:
                 log("muted", f"Beatport: a találatok hossza nem egyezik a fájllal — {query}")
-            return None
-        winner, score = best_track(tracks, artist, title)
-        if not winner:
-            if log:
-                log("muted", f"Beatport: nincs elég biztos találat erre: {query}")
-            return None
-        meta = normalize_track(winner)
-        meta["match_score"] = score
-        ident = parse_beatport_id(meta.get("source_url")) or parse_beatport_id(meta.get("beatport_id"))
-        if ident:
-            meta["beatport_id"] = ident
-        return meta
+            return []
+        from music_id_tagger.match import rank_tracks
+
+        ranked = []
+        for track, score in rank_tracks(tracks, artist, title, limit=3):
+            meta = normalize_track(track)
+            meta["match_score"] = score
+            ident = parse_beatport_id(meta.get("source_url")) or parse_beatport_id(meta.get("beatport_id"))
+            if ident:
+                meta["beatport_id"] = ident
+            ranked.append(meta)
+        if not ranked and log:
+            log("muted", f"Beatport: nincs elég biztos találat erre: {query}")
+        return ranked
 
     def by_id(self, track_id, log: Callable[[str, str], None] | None = None) -> dict[str, Any] | None:
         ident = parse_beatport_id(track_id)

@@ -173,6 +173,43 @@ def path_key(path: Path) -> str:
     return os.path.normcase(str(path.resolve()))
 
 
+def path_to_location(path: Path) -> str:
+    posix = path.resolve().as_posix()
+    if len(posix) >= 2 and posix[1] == ":":
+        return "file://localhost/" + posix
+    if posix.startswith("/"):
+        return "file://localhost" + posix
+    return "file://localhost/" + posix
+
+
+def rewrite_locations(path: Path, mapping: dict[str, str], dry_run: bool) -> int:
+    """Point Rekordbox TRACK Location values at renamed files. Nothing is deleted."""
+    if not mapping or not path.is_file():
+        return 0
+    tree = ET.parse(path)
+    root = tree.getroot()
+    changed = 0
+    for track in root.findall("./COLLECTION/TRACK"):
+        location = location_to_path(track.get("Location") or "")
+        if location is None:
+            continue
+        try:
+            key = path_key(location)
+        except OSError:
+            key = os.path.normcase(str(location))
+        new = mapping.get(key)
+        if not new:
+            continue
+        track.set("Location", path_to_location(Path(new)))
+        changed += 1
+    if changed and not dry_run:
+        backup = path.with_suffix(path.suffix + ".bak")
+        if not backup.exists():
+            shutil.copy2(path, backup)
+        tree.write(path, encoding="UTF-8", xml_declaration=True)
+    return changed
+
+
 def update_library(
     path: Path,
     by_path: dict[str, dict],

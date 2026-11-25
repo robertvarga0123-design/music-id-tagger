@@ -117,4 +117,8 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     stats = run(args.paths, options, log, lambda done, total: None, threading.Event())
+    if args.write:
+        from music_id_tagger.pending import apply_pending, select_for_apply
+
+        apply_pending(select_for_apply(list(stats.pending), "all"), options, log, list(stats.xmls))
     return 0 if stats.failed == 0 else 1

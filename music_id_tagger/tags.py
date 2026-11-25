@@ -51,6 +51,17 @@ def merge_comment(existing: str, ours: str) -> str:
 
 
 def read_tags(path: Path) -> dict[str, Any]:
+    found = _read_tags(path)
+    if not found:
+        return found
+    if not clean(found.get("isrc")):
+        isrc = _read_isrc(path)
+        if isrc:
+            found["isrc"] = isrc
+    return found
+
+
+def _read_tags(path: Path) -> dict[str, Any]:
     ext = path.suffix.lower()
     try:
         if ext == ".mp3":
