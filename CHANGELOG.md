@@ -1,5 +1,9 @@
 # Változások
 
+## 1.5.1
+
+- A frissítés gomb többé nem a Windows „nem találja: \\” ablakát nyitja. A telepítő egy rövid várakozás után indul, parancssor nélkül.
+
 ## 1.5.0
 
 - A keresés csak tervet készít. Az írás külön Alkalmaz lépés, visszavonható.

@@ -10,6 +10,7 @@ from music_id_tagger.updatecheck import (
     allowed_download_url,
     check_update,
     fetch_verified,
+    installer_script,
     parse_sha256,
 )
 
@@ -98,6 +99,22 @@ def test_foreign_url_is_rejected_without_download(tmp_path, monkeypatch):
     with pytest.raises(UpdateError):
         fetch_verified("https://evil.example/MusicIDTagger-Setup.exe", _sha(), directory=str(tmp_path))
     assert list(tmp_path.rglob("*")) == []
+
+
+def test_installer_script_does_not_ask_windows_to_open_a_backslash():
+    script = installer_script(Path(r"C:\Users\Rob Cortez\AppData\Local\Temp\MusicIDTagger-abc\MusicIDTagger-Setup.exe"))
+    assert "WScript.Sleep 2000" in script
+    assert 'ShellExecute "C:\\Users\\Rob Cortez\\AppData\\Local\\Temp\\MusicIDTagger-abc\\MusicIDTagger-Setup.exe"' in script
+    assert "cmd /c" not in script
+    assert 'start ""' not in script
+    mangled = __import__("subprocess").list2cmdline(
+        ["cmd", "/c", 'timeout /t 2 /nobreak >nul & start "" "C:\\MusicIDTagger-Setup.exe"']
+    )
+    assert '\\"' in mangled
+    with pytest.raises(UpdateError):
+        installer_script(Path("/"))
+    with pytest.raises(UpdateError):
+        installer_script(Path("\\\\"))
 
 
 def test_check_update_returns_exact_asset_and_sha(monkeypatch):

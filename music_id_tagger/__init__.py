@@ -4,4 +4,4 @@ A webes keresés és a két AI külön kapcsolható. Hangminta csak a Shazamnak 
 jelszó csak a Beatportnak, fájlútvonal sehova.
 """
 
-__version__ = "1.5.0"
+__version__ = "1.5.1"

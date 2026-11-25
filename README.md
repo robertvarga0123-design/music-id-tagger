@@ -63,7 +63,7 @@ Ha a találat bizonytalan, és megvan mind a két kulcs, a Grok és a Gemini ugy
 
 Az Open Key (`1m`, `1d`) és a zenei nevek (`Amin`, `F# minor`) Camelot kódra váltanak, például `8A`. A Traxsource nincs bekötve. Automatikus hot cue és helyi BPM-elemzés sincs. A kézzel beírt Beatport linket akkor is használja, ha a hossz kicsit eltér.
 
-A frissítés csak akkor indul el, ha a GitHub kiadás leírásában lévő `SHA256:` sor egyezik a letöltött `MusicIDTagger-Setup.exe` fájllal.
+A frissítés csak akkor indul el, ha a GitHub kiadás leírásában lévő `SHA256:` sor egyezik a letöltött `MusicIDTagger-Setup.exe` fájllal. 1.5.0-ig az alkalmazáson belüli Frissítés a Windows „nem találja: \\” ablakát nyithatta. 1.5.1-től a telepítő magától indul. Addig a letöltött Setup fájlt kézzel kell elindítani.
 
 ## Újdonságok az 1.5-ben
 

@@ -7,6 +7,7 @@ the release notes, and only from this repository's GitHub download URL.
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import subprocess
 import sys
@@ -157,10 +158,29 @@ def fetch_verified(url: str, expected_sha: str, *, directory: str | None = None)
     return dest
 
 
+def installer_script(path: Path) -> str:
+    """VBScript that waits, then opens the installer. No ``cmd /c start``.
+
+    Python's list2cmdline turns ``start "" "C:\\setup.exe"`` into escaped
+    quotes. cmd.exe then searches for ``\\`` and Windows shows
+    „A Windows nem találja a következőt: '\\'”.
+    """
+    text = str(path).strip()
+    if not text or text.strip("\\/") == "":
+        raise UpdateError("A telepítő útvonala üres, nem indítom el.")
+    if any(ord(char) < 32 for char in text):
+        raise UpdateError("A telepítő útvonala hibás, nem indítom el.")
+    literal = text.replace('"', '""')
+    return f'WScript.Sleep 2000\r\nCreateObject("Shell.Application").ShellExecute "{literal}"\r\n'
+
+
 def launch_installer(path: Path) -> None:
     """Start the installer after this process has a moment to exit."""
-    if sys.platform == "win32":
-        command = f'timeout /t 2 /nobreak >nul & start "" "{path}"'
-        subprocess.Popen(["cmd", "/c", command], close_fds=True)
+    if sys.platform != "win32":
+        subprocess.Popen([str(path)], start_new_session=True)
         return
-    subprocess.Popen([str(path)], start_new_session=True)
+    script = installer_script(path)
+    launcher = Path(path).with_name("indito.vbs")
+    launcher.write_text(script, encoding="utf-16")
+    os.startfile(str(launcher))  # noqa: S606  Windows-only, path is the verified installer folder
+
