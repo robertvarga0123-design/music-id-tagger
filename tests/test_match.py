@@ -57,6 +57,13 @@ def test_filename():
         "Fisher",
         "Losing It (Extended Mix)",
     )
+    assert parse_filename("Marie Vaunt Marie Vaunt - Rave Generator (Extended Mix).mp3") == (
+        "Marie Vaunt",
+        "Rave Generator (Extended Mix)",
+    )
+    assert parse_filename("Above & Beyond Above & Beyond - Major Drop (Extended Mix).mp3")[0] == "Above & Beyond"
+    assert parse_filename("Bart Skils, Weska Bart Skils, Weska - Your Mind On Acid (Original Mix).mp3")[0] == "Bart Skils, Weska"
+    assert parse_filename("Kaufmann (DE) Kaufmann (DE) - Going Existential In The Rave (Extended).mp3")[0] == "Kaufmann (DE)"
     assert parse_filename("Artist_Name - Track_Title.flac") == ("Artist Name", "Track Title")
     assert parse_filename("nosplit.mp3") is None
 
@@ -116,7 +123,16 @@ def test_rejects_same_artist_different_title():
     assert best_track([weekend], "Pablo Say, David LeSal, Viv Castle", "It's the E")[0] is None
 
 
-def test_shazam_must_match_filename_and_tags():
+def test_web_result_and_version():
+    from music_id_tagger.updatecheck import is_newer
+    from music_id_tagger.websearch import beatport_ids_from_html
+
+    html = 'href="https://www.beatport.com/track/rave-generator/12345678" aHR0cHM6Ly93d3cuYmVhdHBvcnQuY29tL3RyYWNrL290aGVyLzIyMg'
+    assert beatport_ids_from_html(html)[0] == "12345678"
+    assert "222" in beatport_ids_from_html(html)
+    assert is_newer("v1.3.1", "1.3.0") is True
+    assert is_newer("v1.3.0", "1.3.0") is False
+    assert is_newer("v1.2.9", "1.3.0") is False
     from music_id_tagger.match import fingerprint_allowed, search_identity
 
     assert fingerprint_allowed("bbno$", "check", {"artist": "Matt Guy", "title": "Chorale"}, "Matt Guy - Chorale.mp3") is False

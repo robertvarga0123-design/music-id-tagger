@@ -106,6 +106,23 @@ def clean(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value)).strip()
 
 
+def undouble(text: str) -> str:
+    """Collapse ``Marie Vaunt Marie Vaunt`` into ``Marie Vaunt``.
+
+    Some DJ exports write the artist twice in the filename, with a space
+    and no extra dash. Halving stops when the two halves are no longer the same.
+    """
+    current = clean(text)
+    while True:
+        parts = current.split(" ")
+        if len(parts) < 2 or len(parts) % 2:
+            return current
+        half = len(parts) // 2
+        if parts[:half] != parts[half:]:
+            return current
+        current = " ".join(parts[:half])
+
+
 def beatport_genre(genre: str | None, sub_genre: str | None) -> str | None:
     """A Beatport genre.name gyakran már kész DJ-címke: Techno (Peak Time / Driving)."""
     main = clean(genre)
@@ -295,8 +312,8 @@ def fingerprint_allowed(hit_artist: str, hit_title: str, existing: dict | None, 
     """
     anchors: list[tuple[str, str]] = []
     tags = existing or {}
-    tag_artist = clean(tags.get("artist"))
-    tag_title = clean(tags.get("title"))
+    tag_artist = undouble(clean(tags.get("artist")))
+    tag_title = undouble(clean(tags.get("title")))
     if tag_artist and tag_title:
         anchors.append((tag_artist, tag_title))
     parsed = parse_filename(filename or "")
@@ -315,8 +332,8 @@ def search_identity(existing: dict | None, filename: str) -> tuple[str, str, str
     tracks, the filename wins: a bad write must not hide the name on disk.
     """
     tags = existing or {}
-    tag_artist = clean(tags.get("artist"))
-    tag_title = clean(tags.get("title"))
+    tag_artist = undouble(clean(tags.get("artist")))
+    tag_title = undouble(clean(tags.get("title")))
     parsed = parse_filename(filename or "")
     has_tag = bool(tag_artist and tag_title)
     if has_tag and parsed and not same_recording(tag_artist, tag_title, parsed[0], parsed[1]):
@@ -375,8 +392,8 @@ def parse_filename(filename: str) -> tuple[str, str] | None:
     match = _FILENAME.match(stem)
     if not match:
         return None
-    artist = clean(match.group("artist"))
-    title = clean(match.group("title"))
+    artist = undouble(clean(match.group("artist")))
+    title = undouble(clean(match.group("title")))
     if len(artist) < 2 or len(title) < 2:
         return None
     return artist, title

@@ -7,7 +7,8 @@ import webbrowser
 from pathlib import Path
 from tkinter import filedialog, font as tkfont, messagebox, ttk
 
-from music_id_tagger.config import load_password, load_settings, save_settings
+from music_id_tagger import __version__
+from music_id_tagger.config import load_password, load_settings, load_spotify_secret, save_settings
 from music_id_tagger.engine import Options, run
 
 BG = "#10110f"
@@ -32,6 +33,7 @@ _STATE = {
     "apple": "Apple…",
     "musicbrainz": "MusicBrainz…",
     "discogs": "Discogs…",
+    "web": "Keresés…",
     "write": "Írás…",
     "ok": "Kész",
     "unsure": "! Bizonytalan",
@@ -43,7 +45,7 @@ _STATE = {
 class App(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
-        self.title("Music ID Tagger")
+        self.title(f"Music ID Tagger {__version__}")
         self.geometry("980x780")
         self.minsize(860, 680)
         self.configure(bg=BG)
@@ -59,6 +61,7 @@ class App(tk.Tk):
         self._build()
         self._load()
         self.after(120, self._drain)
+        self.after(1500, lambda: self._check_update(False))
         self.protocol("WM_DELETE_WINDOW", self._close)
 
     def _face(self, size: int, bold: bool = False) -> tkfont.Font:
@@ -143,6 +146,7 @@ class App(tk.Tk):
             ("apple", BRASS),
             ("musicbrainz", BRASS),
             ("discogs", BRASS),
+            ("web", BRASS),
             ("write", BRASS),
             ("wait", MUTED),
             ("unsure", WARN),
@@ -190,7 +194,7 @@ class App(tk.Tk):
         self._check(right, "Spotify (album, év, ISRC)", self.use_spotify)
         tk.Label(right, text="Spotify Client ID", bg=PAPER, fg=MUTED).pack(anchor="w", padx=12, pady=(8, 0))
         self.spotify_id = self._entry(right)
-        tk.Label(right, text="Spotify Client Secret  ·  nem mentjük el", bg=PAPER, fg=MUTED).pack(
+        tk.Label(right, text="Spotify Client Secret  ·  erre a gépre emlékezik", bg=PAPER, fg=MUTED).pack(
             anchor="w", padx=12, pady=(8, 0)
         )
         self.spotify_secret = self._entry(right, secret=True)
@@ -233,6 +237,7 @@ class App(tk.Tk):
         self.start_btn = self._button(actions, "Indítás", self._start, BRASS)
         self.start_btn.pack(side="left", padx=(0, 8))
         self._button(actions, "Visszavonás", self._undo, PAPER).pack(side="left", padx=(0, 8))
+        self._button(actions, "Frissítés", lambda: self._check_update(True), PAPER).pack(side="left", padx=(0, 8))
         self.stop_btn = self._button(actions, "Megállítás", self._stop, CLAY)
         self.stop_btn.pack(side="left")
         self.stop_btn.configure(state="disabled")
@@ -405,6 +410,9 @@ class App(tk.Tk):
             self.acoustid.insert(0, str(data["acoustid_key"]))
         if data.get("spotify_client_id"):
             self.spotify_id.insert(0, str(data["spotify_client_id"]))
+        remembered_spotify = load_spotify_secret(data)
+        if remembered_spotify:
+            self.spotify_secret.insert(0, remembered_spotify)
         self.use_shazam.set(bool(data.get("use_shazam", True)))
         self.use_beatport.set(bool(data.get("use_beatport", True)))
         self.use_spotify.set(bool(data.get("use_spotify", True)))
@@ -428,6 +436,7 @@ class App(tk.Tk):
                 "beatport_user": self.user.get().strip(),
                 "beatport_password": self.password.get(),
                 "spotify_client_id": self.spotify_id.get().strip(),
+                "spotify_client_secret": self.spotify_secret.get(),
                 "acoustid_key": self.acoustid.get().strip(),
                 "use_shazam": self.use_shazam.get(),
                 "use_beatport": self.use_beatport.get(),
@@ -614,6 +623,57 @@ class App(tk.Tk):
         self.log.insert("end", text + "\n", level if level in {"ok", "err", "info", "muted"} else "muted")
         self.log.see("end")
         self.log.configure(state="disabled")
+
+    def _check_update(self, manual: bool) -> None:
+        if getattr(self, "_updating", False):
+            return
+        self._updating = True
+        threading.Thread(target=self._update_thread, args=(manual,), daemon=True).start()
+
+    def _update_thread(self, manual: bool) -> None:
+        from music_id_tagger.updatecheck import check_update
+
+        try:
+            info = check_update(__version__)
+        except Exception:
+            info = None
+
+        def finish() -> None:
+            self._updating = False
+            if not info:
+                if manual:
+                    messagebox.showinfo("Music ID Tagger", "Nincs újabb verzió, vagy a frissítés most nem elérhető.")
+                return
+            if not messagebox.askyesno(
+                "Music ID Tagger",
+                f"Van újabb verzió ({info['version']}). Letöltsem és elindítsam a telepítőt?",
+            ):
+                return
+            self._write("info", f"Frissítés letöltése: {info['version']}")
+            threading.Thread(target=self._download_update, args=(info,), daemon=True).start()
+
+        self.after(0, finish)
+
+    def _download_update(self, info: dict) -> None:
+        import tempfile
+
+        from music_id_tagger.updatecheck import download, launch_installer
+
+        dest = Path(tempfile.gettempdir()) / "MusicIDTagger-Setup.exe"
+        try:
+            download(info["url"], dest)
+        except Exception as exc:
+            message = str(exc)
+            self.after(0, lambda message=message: messagebox.showerror("Music ID Tagger", f"A frissítést nem tudtam letölteni: {message}"))
+            return
+
+        def install() -> None:
+            self._write("ok", "A telepítő indul. A program bezárul.")
+            launch_installer(dest)
+            self._persist()
+            self.destroy()
+
+        self.after(0, install)
 
     def _close(self) -> None:
         self._persist()

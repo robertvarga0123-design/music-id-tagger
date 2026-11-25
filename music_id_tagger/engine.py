@@ -408,6 +408,24 @@ def _forced_beatport_id(path: Path, options: Options) -> str:
     return ""
 
 
+async def _web_beatport(found, artist, title, beatport, take, stage, flog) -> None:
+    """When the Beatport search misses, look the track up on the web and open that id."""
+    from music_id_tagger.websearch import beatport_ids
+
+    stage("web")
+    ids = await asyncio.to_thread(beatport_ids, artist, title, flog)
+    for ident in ids:
+        hit = await asyncio.to_thread(beatport.by_id, ident, flog)
+        if not hit:
+            continue
+        hit = dict(hit)
+        # Not 100: the page has to match the filename and the length. A pasted link stays exact.
+        hit["match_score"] = 18
+        if take(hit, artist, title) == "accepted" and found.get("beatport_id"):
+            flog("ok", f"Beatport a webes keresésből: {found.get('beatport_id')}")
+            return
+
+
 def run(
     paths: list[str],
     options: Options,
@@ -701,6 +719,9 @@ async def _one(path: Path, options: Options, beatport, spotify, shazam, log: Log
         stage("beatport")
         hit = await asyncio.to_thread(beatport.search, query_artist, query_title, flog, file_duration)
         take(hit, query_artist, query_title)
+
+    if beatport is not None and query_artist and query_title and not found.get("beatport_id"):
+        await _web_beatport(found, query_artist, query_title, beatport, take, stage, flog)
 
     if options.use_open_catalogs:
         await _open_catalogs(

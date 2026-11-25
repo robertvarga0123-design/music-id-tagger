@@ -6,7 +6,7 @@ on:
     branches: [main]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -60,3 +60,21 @@ jobs:
           name: MusicIDTagger-Setup
           path: installer/Output/MusicIDTagger-Setup.exe
           if-no-files-found: error
+
+      - name: Publish release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = "Continue"
+          $match = Select-String -Path music_id_tagger/__init__.py -Pattern '__version__ = "([^"]+)"'
+          if (-not $match) { throw "nincs verzió" }
+          $version = $match.Matches[0].Groups[1].Value
+          $tag = "v$version"
+          gh release view $tag
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag installer/Output/MusicIDTagger-Setup.exe --clobber
+          } else {
+            gh release create $tag installer/Output/MusicIDTagger-Setup.exe --title "Music ID Tagger $version" --notes "Windows telepítő. A program indításkor ezt a kiadást nézi."
+          }
+          if ($LASTEXITCODE -ne 0) { throw "A kiadást nem sikerült közzétenni" }

@@ -30,8 +30,16 @@ def load_settings() -> dict:
 
 
 def load_password(data: dict | None = None) -> str:
+    return _load_secret(data, "beatport_password_dpapi")
+
+
+def load_spotify_secret(data: dict | None = None) -> str:
+    return _load_secret(data, "spotify_client_secret_dpapi")
+
+
+def _load_secret(data: dict | None, key: str) -> str:
     source = data if data is not None else load_settings()
-    token = source.get("beatport_password_dpapi")
+    token = source.get(key)
     if not isinstance(token, str) or not token:
         return ""
     try:
@@ -41,23 +49,33 @@ def load_password(data: dict | None = None) -> str:
 
 
 def save_settings(data: dict) -> None:
+    previous = load_settings()
     clean = dict(data)
-    password = clean.pop("beatport_password", None)
+    _store_secret(clean, previous, "beatport_password", "beatport_password_dpapi")
     clean.pop("password", None)
-    clean.pop("spotify_client_secret", None)
+    _store_secret(clean, previous, "spotify_client_secret", "spotify_client_secret_dpapi")
     clean.pop("client_secret", None)
-    if isinstance(password, str) and password:
-        token = _protect(password)
-        if token:
-            clean["beatport_password_dpapi"] = token
-    else:
-        clean.pop("beatport_password_dpapi", None)
     folder = settings_dir()
     folder.mkdir(parents=True, exist_ok=True)
     settings_path().write_text(
         json.dumps(clean, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+
+
+def _store_secret(clean: dict, previous: dict, field: str, blob_name: str) -> None:
+    """Remember a secret with DPAPI. An empty field keeps the saved one."""
+    secret = clean.pop(field, None)
+    if isinstance(secret, str) and secret:
+        token = _protect(secret)
+        if token:
+            clean[blob_name] = token
+            return
+    old = previous.get(blob_name)
+    if isinstance(old, str) and old:
+        clean[blob_name] = old
+    else:
+        clean.pop(blob_name, None)
 
 
 def _protect(secret: str) -> str:
